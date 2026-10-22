@@ -125,22 +125,23 @@ create_generated_clock -name CAT_FB_CLK -source [get_pins u_antsdr_e200_io/oddr_
 
 
 
-set_input_delay -clock [get_clocks CAT_DCLK_P] -max 5.700 [get_ports {CAT_P0_D* CAT_RX_FRAME}]
-set_input_delay -clock [get_clocks CAT_DCLK_P] -min 4.500 [get_ports {CAT_P0_D* CAT_RX_FRAME}]
-set_input_delay -clock [get_clocks CAT_DCLK_P] -clock_fall -max -add_delay 5.700 [get_ports {CAT_P0_D* CAT_RX_FRAME}]
-set_input_delay -clock [get_clocks CAT_DCLK_P] -clock_fall -min -add_delay 4.500 [get_ports {CAT_P0_D* CAT_RX_FRAME}]
+set_input_delay -clock [get_clocks CAT_DCLK_P] -max 5.700 [get_ports {CAT_P0_D* CAT_RX_FR_P}]
+set_input_delay -clock [get_clocks CAT_DCLK_P] -min 4.500 [get_ports {CAT_P0_D* CAT_RX_FR_P}]
+set_input_delay -clock [get_clocks CAT_DCLK_P] -clock_fall -max -add_delay 5.700 [get_ports {CAT_P0_D* CAT_RX_FR_P}]
+set_input_delay -clock [get_clocks CAT_DCLK_P] -clock_fall -min -add_delay 4.500 [get_ports {CAT_P0_D* CAT_RX_FR_P}]
 
 
-set_output_delay -clock CAT_FB_CLK -max 5.500 [get_ports {CAT_P1_D* CAT_TX_FRAME}]
-set_output_delay -clock CAT_FB_CLK -min 4.500 [get_ports {CAT_P1_D* CAT_TX_FRAME}]
-set_output_delay -clock CAT_FB_CLK -clock_fall -max -add_delay 5.500 [get_ports {CAT_P1_D* CAT_TX_FRAME}]
-set_output_delay -clock CAT_FB_CLK -clock_fall -min -add_delay 4.500 [get_ports {CAT_P1_D* CAT_TX_FRAME}]
+set_output_delay -clock CAT_FB_CLK -max 5.500 [get_ports {CAT_P1_D* CAT_TX_FR_P}]
+set_output_delay -clock CAT_FB_CLK -min 4.500 [get_ports {CAT_P1_D* CAT_TX_FR_P}]
+set_output_delay -clock CAT_FB_CLK -clock_fall -max -add_delay 5.500 [get_ports {CAT_P1_D* CAT_TX_FR_P}]
+set_output_delay -clock CAT_FB_CLK -clock_fall -min -add_delay 4.500 [get_ports {CAT_P1_D* CAT_TX_FR_P}]
 
 
 set_false_path -from [get_pins radio_sync/reset_out_reg/C]
 set_false_path -from [get_pins clk40_reset_gen/reset_out_reg/C]
 
-set_clock_groups -name async_clk0_clk1 -asynchronous -group [get_clocks -include_generated_clocks CAT_DCLK_P] -group [get_clocks -include_generated_clocks CLK_40MHz_FPGA]
-set_clock_groups -name async_clk0_clk1 -asynchronous -group [get_clocks -include_generated_clocks rgmii_rxc] -group [get_clocks -include_generated_clocks CLK_40MHz_FPGA]
+# Each group needs its own name; redefining a group replaces its exceptions.
+set_clock_groups -name async_radio_system -asynchronous -group [get_clocks -include_generated_clocks CAT_DCLK_P] -group [get_clocks -include_generated_clocks CLK_40MHz_FPGA]
+set_clock_groups -name async_rgmii_system -asynchronous -group [get_clocks -include_generated_clocks rgmii_rxc] -group [get_clocks -include_generated_clocks CLK_40MHz_FPGA]
 
 set_false_path -from [get_clocks CAT_DCLK_P] -to [get_clocks u_antsdr_e200_io/BUFR_inst/O]
