@@ -115,6 +115,10 @@ make -j8 TARGET=e310v2 image
 
 `TARGET=e310v2` 的行为完全相同。
 
+较新的 Linux 主机可使用 `docker/Dockerfile` 提供的 Ubuntu 18.04 构建环境。
+Xilinx 工具在主机上安装后，以只读方式挂载到容器；构建产物保留在仓库中。
+具体命令见英文版的[容器构建说明](README.md#build-in-an-ubuntu-1804-container)。
+
 ## 无需硬件的回归检查
 
 在仓库根目录运行：

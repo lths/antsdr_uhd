@@ -131,6 +131,31 @@ Common targets:
 
 The same targets support `TARGET=e310v2`.
 
+## Build in an Ubuntu 18.04 container
+
+For hosts with newer compilers and system libraries, `docker/Dockerfile`
+provides the Ubuntu 18.04 dependencies used with Vivado/SDK 2019.1. Install
+the Xilinx tools on the host first, including SDK and Zynq-7000 support.
+The tools are mounted read-only into the container at their original path.
+
+From the repository root:
+
+```sh
+export XILINX_ROOT=/home/luke/Xilinx
+docker build -t antsdr-build:2019.1 firmware/docker
+docker run --rm --init --cpus=8 \
+    --mount type=bind,source="$PWD",target=/work \
+    --mount type=bind,source="$XILINX_ROOT",target="$XILINX_ROOT",readonly \
+    --mount type=volume,source=antsdr-build-home,target=/home/builder \
+    --env XILINX_ROOT \
+    antsdr-build:2019.1 bash scripts/build_image.sh e200 -j 8
+```
+
+The container runs as UID/GID 1000, which must be able to write the repository.
+Build outputs remain in the host repository under `firmware/build/` and
+`firmware/build_sdimg/`. The named volume holds the container user's Xilinx
+settings and logs. Xilinx license and WebTalk terms still apply.
+
 ## Hardware-free regression checks
 
 From the repository root, run:
