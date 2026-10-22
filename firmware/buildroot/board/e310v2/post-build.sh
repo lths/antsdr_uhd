@@ -51,7 +51,6 @@ ${INSTALL} -D -m 0755 ${BOARD_DIR}/S20urandom ${TARGET_DIR}/etc/init.d/
 ${INSTALL} -D -m 0755 ${BOARD_DIR}/S21misc ${TARGET_DIR}/etc/init.d/
 ${INSTALL} -D -m 0755 ${BOARD_DIR}/S40network ${TARGET_DIR}/etc/init.d/
 ${INSTALL} -D -m 0644 ${BOARD_DIR}/fw_env.config ${TARGET_DIR}/etc/
-${INSTALL} -D -m 0644 ${BOARD_DIR}/VERSIONS ${TARGET_DIR}/opt/
 ${INSTALL} -D -m 0755 ${BOARD_DIR}/device_reboot ${TARGET_DIR}/usr/sbin/
 ${INSTALL} -D -m 0755 ${BOARD_DIR}/device_passwd ${TARGET_DIR}/usr/sbin/
 ${INSTALL} -D -m 0644 "${BOARD_DIR}/../antsdr/persistence.sh" "${TARGET_DIR}/usr/lib/antsdr/persistence.sh"
@@ -78,3 +77,7 @@ ln -sf ../../wpa_supplicant/ifupdown.sh ${TARGET_DIR}/etc/network/if-pre-up.d/wp
 ln -sf ../../wpa_supplicant/ifupdown.sh ${TARGET_DIR}/etc/network/if-post-down.d/wpasupplicant
 
 ln -sf device_reboot ${TARGET_DIR}/usr/sbin/e200_reboot
+
+# Identify the source actually packaged, rather than historical release strings.
+python3 "${BOARD_DIR}/../../../scripts/build_info.py" --board "${BOARD_NAME}" \
+	--target-dir "${TARGET_DIR}" --compiler "${BR2_TOOLCHAIN_EXTERNAL_PREFIX}-gcc"

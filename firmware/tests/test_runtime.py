@@ -1,6 +1,7 @@
 """Exercise boot and credential scripts with device paths redirected to a sandbox."""
 
 import os
+import json
 import re
 from pathlib import Path
 import shutil
@@ -313,5 +314,10 @@ class PostBuildTest(SandboxTest):
                 diagnostic = target / 'usr/sbin/antsdr-diagnostics'
                 self.assertEqual(library.read_bytes(), (FIRMWARE / 'buildroot/board/antsdr/persistence.sh').read_bytes())
                 self.assertTrue(os.access(diagnostic, os.X_OK))
+                info = json.loads((target / 'etc/antsdr-release.json').read_text())
+                self.assertEqual(info['board'], board)
+                self.assertEqual(info['linux'], '5.2.28')
+                self.assertNotIn('#BUILD#', (target / 'etc/motd').read_text())
+                self.assertIn(info['source_revision'], (target / 'opt/VERSIONS').read_text())
                 for command in ('device_passwd', 'device_persistent_keys'):
                     self.assertTrue(os.access(target / 'usr/sbin' / command, os.X_OK))

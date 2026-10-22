@@ -15,6 +15,7 @@ section 'System and firmware'
 run date -u
 run uname -a
 run cat /opt/VERSIONS
+run cat /etc/antsdr-release.json
 section 'Device service'
 run /etc/init.d/S90device_start.sh status
 section 'Network'

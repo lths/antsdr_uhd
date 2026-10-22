@@ -180,6 +180,17 @@ ANTSDR_TEST_BUSYBOX=/path/to/busybox python3 -m unittest discover -s firmware/te
 
 ## Device maintenance
 
+Each root filesystem contains `/etc/antsdr-release.json` with the source commit,
+board, clean/dirty source state, UTC build time, component versions, and compiler.
+The login banner and `/opt/VERSIONS` show the same source identity, and
+`antsdr-diagnostics` includes the JSON record. Builds from source archives report
+an explicit unknown revision. `SOURCE_DATE_EPOCH`, when set, supplies the build
+timestamp for reproducibility. The post-build generator requires host Python 3.
+
+After deployment, compare `source_revision` on the running board against the
+commit used for the build. An SD-card manifest alone does not establish which
+root filesystem is currently running.
+
 On the board, collect a read-only support report with:
 
 ```sh
