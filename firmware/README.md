@@ -186,6 +186,8 @@ The login banner and `/opt/VERSIONS` show the same source identity, and
 `antsdr-diagnostics` includes the JSON record. Builds from source archives report
 an explicit unknown revision. `SOURCE_DATE_EPOCH`, when set, supplies the build
 timestamp for reproducibility. The post-build generator requires host Python 3.
+SD image packaging also refreshes `build_sdimg/BUILD_INFO.json` from the rootfs
+identity and writes `SHA256SUMS` for the boot files and manifest.
 
 After deployment, compare `source_revision` on the running board against the
 commit used for the build. An SD-card manifest alone does not establish which

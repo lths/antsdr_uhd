@@ -185,6 +185,8 @@ sdimg: build/BOOT.bin build/system_top.bit build/uImage build/uboot-env.txt buil
 	cp build/rootfs.cpio.gz $(SDIMGDIR)/ramdisk.image.gz
 	mkimage -A arm -T ramdisk -C gzip -d $(SDIMGDIR)/ramdisk.image.gz $(SDIMGDIR)/uramdisk.image.gz
 	rm $(SDIMGDIR)/ramdisk.image.gz
+	cp buildroot/output/target/etc/antsdr-release.json $(SDIMGDIR)/BUILD_INFO.json
+	cd $(SDIMGDIR) && sha256sum BOOT.bin antsdr.bit uImage uEnv.txt devicetree.dtb uramdisk.image.gz BUILD_INFO.json > SHA256SUMS
 	@echo "ANTSDR-$(shell echo $(TARGET) | tr a-z A-Z) SD image ready: $(SDIMGDIR)"
 
 clean-build:
