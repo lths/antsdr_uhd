@@ -54,6 +54,8 @@ ${INSTALL} -D -m 0644 ${BOARD_DIR}/fw_env.config ${TARGET_DIR}/etc/
 ${INSTALL} -D -m 0644 ${BOARD_DIR}/VERSIONS ${TARGET_DIR}/opt/
 ${INSTALL} -D -m 0755 ${BOARD_DIR}/device_reboot ${TARGET_DIR}/usr/sbin/
 ${INSTALL} -D -m 0755 ${BOARD_DIR}/device_passwd ${TARGET_DIR}/usr/sbin/
+${INSTALL} -D -m 0644 "${BOARD_DIR}/../antsdr/persistence.sh" "${TARGET_DIR}/usr/lib/antsdr/persistence.sh"
+${INSTALL} -D -m 0755 "${BOARD_DIR}/../antsdr/antsdr-diagnostics" "${TARGET_DIR}/usr/sbin/antsdr-diagnostics"
 ${INSTALL} -D -m 0755 ${BOARD_DIR}/device_persistent_keys ${TARGET_DIR}/usr/sbin/
 ${INSTALL} -D -m 0755 ${BOARD_DIR}/device_format_jffs2 ${TARGET_DIR}/usr/sbin/
 ${INSTALL} -D -m 0644 ${BOARD_DIR}/motd ${TARGET_DIR}/etc/

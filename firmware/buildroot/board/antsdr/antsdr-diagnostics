@@ -1,0 +1,33 @@
+#!/bin/sh
+# Read-only support report. Never include passwords, private keys or environment.
+case "$1" in
+	''|--help|-h) ;;
+	*) echo "Usage: $0 [--help]" >&2; exit 2 ;;
+esac
+if [ -n "$1" ]; then
+	echo 'Usage: antsdr-diagnostics (prints a read-only device support report)'
+	exit 0
+fi
+
+section() { printf '\n== %s ==\n' "$1"; }
+run() { "$@" 2>&1 || printf '(unavailable: %s)\n' "$*"; }
+section 'System and firmware'
+run date -u
+run uname -a
+run cat /opt/VERSIONS
+section 'Device service'
+run /etc/init.d/S90device_start.sh status
+section 'Network'
+run ip -s link show dev eth0
+run ip -4 addr show dev eth0
+run ip route show
+run ethtool eth0
+run ethtool -S eth0
+run ethtool -c eth0
+section 'Memory and load'
+run cat /proc/meminfo
+run cat /proc/loadavg
+section 'Persistent storage'
+awk '$2 == "/mnt/jffs2" {print; found=1} END {if(!found) print "JFFS2 not mounted"}' /proc/mounts
+section 'Recent kernel messages'
+dmesg 2>&1 | tail -80

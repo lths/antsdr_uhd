@@ -1,20 +1,49 @@
-#! /bin/sh
+#!/bin/sh
+. /usr/lib/antsdr/persistence.sh || exit 1
 
+restore_passwords() {
+	persist_directory passwords "$PERSIST_ROOT/etc" || return 1
+	[ -f "$dir/password.md5" ] || { [ "$HAS_SNAPSHOT" -eq 0 ]; return $?; }
+	(cd "$dir" && md5sum -c password.md5 > /dev/null) || return 1
+	install -m 0644 "$dir/passwd" "$dir/group" /etc/ &&
+		install -m 0600 "$dir/shadow" /etc/
+}
+
+restore_dropbear() {
+	persist_directory dropbear "$PERSIST_ROOT/etc/dropbear" || return 1
+	[ -f "$dir/keys.md5" ] || { [ "$HAS_SNAPSHOT" -eq 0 ]; return $?; }
+	(cd "$dir" && md5sum -c keys.md5 > /dev/null) || return 1
+	mkdir -p /etc/dropbear || return 1
+	for key in "$dir"/dropbear_*_host_key; do
+		[ -f "$key" ] || continue
+		install -m 0600 "$key" /etc/dropbear/ || return 1
+	done
+}
+
+restore_authorized_keys() {
+	persist_directory authorized_keys "$PERSIST_ROOT/root/.ssh" || return 1
+	[ -f "$dir/keys.md5" ] || { [ "$HAS_SNAPSHOT" -eq 0 ]; return $?; }
+	(cd "$dir" && md5sum -c keys.md5 > /dev/null) || return 1
+	mkdir -p /root/.ssh && chmod 0700 /root/.ssh &&
+		install -m 0600 "$dir/authorized_keys" /root/.ssh/
+}
 
 case "$1" in
 	start|"")
-		echo -n "Starting miscellaneous setup: "
-		# Restore saved password and Dropbear keys
-		[[ -d /mnt/jffs2/etc ]] && cd /mnt/jffs2/etc && md5sum -s -c password.md5 && cp passwd shadow group /etc
-		[[ -d /mnt/jffs2/etc/dropbear ]] && cd /mnt/jffs2/etc/dropbear && md5sum -s -c keys.md5 && cp dropbear* /etc/dropbear/
-		[[ -d /mnt/jffs2/root/.ssh ]] && cd /mnt/jffs2/root/.ssh && md5sum -s -c keys.md5 && mkdir /root/.ssh && cp authorized_keys /root/.ssh
-		[ $? = 0 ] && echo "OK" || echo "FAIL"
+		if ! persist_mounted; then
+			echo 'Persistent storage unavailable; keeping current credentials'
+			exit 0
+		fi
+		persist_lock || exit 1
+		result=0
+		for kind in passwords dropbear authorized_keys; do
+			if ! "restore_$kind"; then
+				echo "Failed to restore $kind" >&2
+				result=1
+			fi
+		done
+		exit "$result"
 		;;
-	stop)
-
-		;;
-	*)
-		echo "Usage: $0 {start|stop}" >&2
-		exit 1
-		;;
+	stop) exit 0 ;;
+	*) echo "Usage: $0 {start|stop}" >&2; exit 1 ;;
 esac

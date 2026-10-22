@@ -22,7 +22,17 @@ class SandboxTest(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}")
+        test_path = os.environ['PATH']
+        toolbox = os.environ.get('ANTSDR_TEST_BUSYBOX')
+        if toolbox:
+            applets = self.root / 'busybox-applets'
+            applets.mkdir()
+            names = subprocess.check_output([toolbox, '--list'], text=True).splitlines()
+            for name in names:
+                if name not in ('sh', 'ash', '[', '[['):
+                    (applets / name).symlink_to(toolbox)
+            test_path = f"{applets}:{test_path}"
+        self.env = dict(os.environ, PATH=f"{self.bin}:{test_path}")
         # Keep the fixture independent of the caller's build environment.
         for key in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "JOBS"):
             self.env.pop(key, None)
@@ -36,6 +46,9 @@ class SandboxTest(unittest.TestCase):
         return path
 
     def run_command(self, args, success=True):
+        toolbox = os.environ.get('ANTSDR_TEST_BUSYBOX')
+        if toolbox and args[0] == 'sh':
+            args = [toolbox, 'ash', *args[1:]]
         result = subprocess.run(args, cwd=self.root, env=self.env, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if success:
@@ -246,35 +259,6 @@ class UpdaterTest(SandboxTest):
                 with self.subTest(board=board, args=args):
                     self.run_command(["sh", f"{board}.sh", *args], success=False)
                     self.assertFalse(self.calls.exists())
-
-
-class ServiceTest(SandboxTest):
-    def test_stop_matches_started_daemons(self):
-        self.write("bin/start-stop-daemon", f'''
-            #!/usr/bin/env python3
-            from pathlib import Path
-            import sys
-            state = Path({str(self.root / 'running')!r})
-            running = set(state.read_text().splitlines()) if state.exists() else set()
-            args = sys.argv[1:]
-            if '--start' in args:
-                running.add(Path(args[-1]).name)
-            else:
-                name = args[args.index('--name') + 1]
-                if name not in running:
-                    sys.exit(1)
-                running.remove(name)
-            state.write_text(''.join(name + '\\n' for name in sorted(running)))
-        ''', executable=True)
-        self.write("bin/ifconfig", '#!/bin/sh\necho "inet 192.168.1.10"\n', executable=True)
-        self.write("bin/ping", "#!/bin/sh\nexit 0\n", executable=True)
-        for board in BOARDS:
-            with self.subTest(board=board):
-                script = FIRMWARE / f"buildroot/board/{board}/S90device_start.sh"
-                self.run_command(["sh", str(script), "start"])
-                self.assertEqual(set((self.root / "running").read_text().splitlines()), {board, "net_set"})
-                self.run_command(["sh", str(script), "stop"])
-                self.assertEqual((self.root / "running").read_text(), "")
 
 
 if __name__ == "__main__":

@@ -1,55 +1,72 @@
 #!/bin/sh
-#
-# Start the network....
-#
 
-# Debian ifupdown needs the /run/network lock directory
+. /etc/device_config || exit 1
 
-source /etc/device_config
+create_system_files() {
+	HOSTNAME=$(fw_printenv -n hostname 2>/dev/null || cat /etc/hostname) || return 1
+	[ -n "$HOSTNAME" ] || return 1
+	printf '%s\n' "$HOSTNAME" > /etc/hostname || return 1
+	ETH_IPADDR=$(fw_printenv -n ipaddr_eth 2>/dev/null || echo 192.168.1.10)
+	ETH_NETMASK=$(fw_printenv -n netmask_eth 2>/dev/null || echo 255.255.255.0)
 
-create_system_files () {
-
-	IFAC=/etc/network/interfaces
-
-	HOSTNAME=`fw_printenv -n hostname 2> /dev/null || cat /etc/hostname`
-	echo $HOSTNAME > /etc/hostname
-
-	ETH_IPADDR=`fw_printenv -n ipaddr_eth 2> /dev/null || echo 192.168.1.10`
-	ETH_NETMASK=`fw_printenv -n netmask_eth 2> /dev/null || echo 255.255.255.0`
-
-	echo -e "auto eth0" >> $IFAC
-	if [ -n "$ETH_IPADDR" ]
-	then
-		echo -e "iface eth0 inet static" >> $IFAC
-		echo -e "\taddress $ETH_IPADDR\n""\tnetmask $ETH_NETMASK\n" >> $IFAC
-	else
-		echo -e "iface eth0 inet dhcp\n" >> $IFAC
+	# Replace the managed IPv4 stanza, including duplicates from older firmware.
+	# Keep loopback, IPv6 and configuration for other interfaces.
+	tmp=$(mktemp "$IFAC.XXXXXX") || return 1
+	if {
+		if [ -f "$IFAC" ]; then
+			awk '
+			/^# BEGIN ANTSDR eth0$/ { managed=1; next }
+			/^# END ANTSDR eth0$/ { managed=0; next }
+			managed { next }
+			$1 == "iface" && $2 == "eth0" && $3 == "inet" { skip=1; next }
+			skip && (/^[ \t]/ || /^[ \t]*$/) { next }
+			{ skip=0 }
+			$1 == "auto" || $1 == "allow-hotplug" {
+				line=$1; count=0
+				for (i=2; i<=NF; i++) if ($i != "eth0") { line=line " " $i; count++ }
+				if (count) print line
+				next
+			}
+			{ print }
+			' "$IFAC"
+		else
+			printf 'auto lo\niface lo inet loopback\n'
+		fi &&
+		printf '# BEGIN ANTSDR eth0\nauto eth0\n' &&
+		if [ -n "$ETH_IPADDR" ]; then
+			printf 'iface eth0 inet static\n\taddress %s\n\tnetmask %s\n' "$ETH_IPADDR" "$ETH_NETMASK"
+		else
+			printf 'iface eth0 inet dhcp\n'
+		fi &&
+		printf '# END ANTSDR eth0\n'
+	} > "$tmp" && chmod 0644 "$tmp" && mv -f "$tmp" "$IFAC"; then
+		return 0
 	fi
-	}
+	rm -f "$tmp"
+	return 1
+}
 
-mkdir -p /run/network
+start() {
+	mkdir -p /run/network || return 1
+	create_system_files || return 1
+	/bin/hostname -F /etc/hostname || return 1
+	printf 'Starting network: '
+	if output=$(/sbin/ifup -a 2>&1); then result=0; else result=$?; fi
+	if [ -n "$output" ]; then
+		printf '%s\n' "$output"
+		printf '%s\n' "$output" | logger -t S40network
+	fi
+	if [ "$result" -eq 0 ]; then echo OK; else echo FAIL; fi
+	return "$result"
+}
+
+stop() {
+	printf 'Stopping network: '
+	if /sbin/ifdown -a; then echo OK; else result=$?; echo FAIL; return "$result"; fi
+}
 
 case "$1" in
-  start)
-	create_system_files
-	printf "Starting network: "
-	/bin/hostname -F /etc/hostname
-	/sbin/ifup -a 2>&1 | logger
-	[ $? = 0 ] && echo "OK" || echo "FAIL"
-	;;
-  stop)
-	printf "Stopping network: "
-	/sbin/ifdown -a
-	[ $? = 0 ] && echo "OK" || echo "FAIL"
-	;;
-  restart|reload)
-	"$0" stop
-	"$0" start
-	;;
-  *)
-	echo "Usage: $0 {start|stop|restart}"
-	exit 1
+	start|stop) "$1" ;;
+	restart|reload) stop && start ;;
+	*) echo "Usage: $0 {start|stop|restart|reload}" >&2; exit 1 ;;
 esac
-
-exit $?
-

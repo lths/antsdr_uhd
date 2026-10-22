@@ -1,11 +1,11 @@
 #!/bin/sh
-set +e
-
-cat /proc/mounts | grep -q mtd2 || (echo "Filesystem not mounted use device_format_jffs2 command to setup your partition"; exit 1)
-
+set -e
+. /usr/lib/antsdr/persistence.sh
+persist_require
+persist_lock
 passwd
-install -D /etc/passwd /etc/shadow /etc/group -t /mnt/jffs2/etc
-cd /etc
-md5sum passwd shadow group 2>/dev/null > /mnt/jffs2/etc/password.md5
-sync
-
+persist_begin passwords
+install -m 0644 /etc/passwd /etc/group "$SNAPSHOT/"
+install -m 0600 /etc/shadow "$SNAPSHOT/"
+(cd "$SNAPSHOT" && md5sum passwd shadow group > password.md5)
+persist_publish

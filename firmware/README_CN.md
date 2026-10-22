@@ -128,6 +128,27 @@ python3 -m unittest discover -s firmware/tests -v
 主机 GCC 和标准 shell 工具，无需 Xilinx 工具或设备访问。完整固件构建和板上验证
 仍需要上述构建环境及对应硬件。
 
+## 设备维护
+
+在开发板上收集只读诊断信息和查看服务状态：
+
+```sh
+antsdr-diagnostics > /tmp/antsdr-diagnostics.txt
+/etc/init.d/S90device_start.sh status
+```
+
+诊断信息包含版本、服务状态、以太网和 FPGA/DMA 计数器、内存及近期内核日志，
+不收集凭据文件。网络重启不会重复添加 eth0 IPv4 配置，并保留其他接口和 IPv6
+配置。设备服务通过 `/run` 中的 PID 文件管理控制进程、网络助手和发现用 ping。
+
+`device_passwd` 和 `device_persistent_keys` 要求 `/mnt/jffs2` 已以读写模式挂载为
+JFFS2。保存操作加锁后，将完整快照写入 `.antsdr/`，通过原子替换 `.current`
+指针文件发布。启动时校验后恢复，也兼容旧的 `etc/` 和 `root/.ssh/` 布局。
+存储不可用时，启动保留当前凭据；保存命令报错且不向未挂载目录写入。
+
+当前 E200 Linux 设备树未声明 QSPI 分区，闪存访问和持久化仍需板上验证。
+这些命令不会格式化存储或更改分区定义。
+
 ## FPGA 工程开发流程
 
 ### 从受控源码重新创建工程

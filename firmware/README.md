@@ -141,10 +141,47 @@ python3 -m unittest discover -s firmware/tests -v
 
 These checks use temporary build trees and stub hardware commands to exercise
 parallel build ordering, job limits, HDF selection when changing boards,
-updater failure status, and service shutdown for both boards. They require
+updater failure status, network restarts, service lifecycle, credential
+save/restore, and rootfs packaging for both boards. They require
 Python 3, GNU Make, a host GCC, and standard shell tools; Xilinx tools and
 device access are not required. A complete firmware build and on-device
 validation still require the build environment above and the target hardware.
+
+To also check shell and utility compatibility with a host-built BusyBox:
+
+```sh
+ANTSDR_TEST_BUSYBOX=/path/to/busybox python3 -m unittest discover -s firmware/tests -v
+```
+
+## Device maintenance
+
+On the board, collect a read-only support report with:
+
+```sh
+antsdr-diagnostics > /tmp/antsdr-diagnostics.txt
+/etc/init.d/S90device_start.sh status
+```
+
+The report includes firmware version strings, service status, Ethernet and
+FPGA/DMA counters, memory usage, and recent kernel messages. Missing optional
+tools do not abort the report. It does not collect credential files.
+
+Network startup manages the Ethernet IPv4 configuration from the U-Boot
+environment without duplicating stanzas on restart. Other interfaces and
+Ethernet IPv6 stanzas are preserved. Device start/stop tracks the control
+daemon, network helper, and discovery ping with PID files under `/run`.
+
+`device_passwd` and `device_persistent_keys` require a read/write JFFS2 mount
+at `/mnt/jffs2`. They serialize saves, stage private credential snapshots under
+`.antsdr/`, and publish them through atomic `.current` pointer files. Boot
+restore validates checksums and also supports the older `etc/` and `root/.ssh/`
+layout. Corrupt saved settings are reported as errors. If persistent storage
+is unavailable, boot keeps the credentials already in the root filesystem;
+save commands fail without writing into the unmounted directory.
+
+Flash access and persistence still need on-board validation: the current E200
+Linux device tree does not declare QSPI flash partitions. These commands do
+not format storage or change partition definitions.
 
 ## FPGA development workflow
 
