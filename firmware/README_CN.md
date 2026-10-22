@@ -83,6 +83,10 @@ scripts/build_image.sh e310v2 --rebuild-fpga
 scripts/build_image.sh e200 --rebuild-fpga -j 8
 ```
 
+内核和 U-Boot 的子构建继承外层 Make 的并行任务限制。设备树在内核构建完成后
+生成，避免配置文件和生成文件的竞争。每次构建都会重新检查所选开发板的 HDF，
+因此在 E200 和 E310V2 之间切换时，无需先清理 `build/`。
+
 ## 使用 Makefile 构建
 
 如果已经手动加载工具环境，也可以直接使用 Makefile：
@@ -94,8 +98,8 @@ export PATH=/opt/Xilinx/SDK/2019.1/gnu/aarch32/lin/gcc-arm-linux-gnueabi/bin:$PA
 export CROSS_COMPILE=arm-linux-gnueabihf-
 
 cd firmware
-make TARGET=e200 image
-make TARGET=e310v2 image
+make -j8 TARGET=e200 image
+make -j8 TARGET=e310v2 image
 ```
 
 常用目标：
@@ -110,6 +114,19 @@ make TARGET=e310v2 image
 | `make TARGET=e200 clean-build` | 删除固件 `build/` 和 `build_sdimg/` |
 
 `TARGET=e310v2` 的行为完全相同。
+
+## 无需硬件的回归检查
+
+在仓库根目录运行：
+
+```sh
+python3 -m unittest discover -s firmware/tests -v
+```
+
+测试使用临时构建目录和模拟硬件命令，检查两种开发板的并行构建顺序、任务限制、
+切换开发板时的 HDF 选择、升级失败状态和服务停止行为。需要 Python 3、GNU Make、
+主机 GCC 和标准 shell 工具，无需 Xilinx 工具或设备访问。完整固件构建和板上验证
+仍需要上述构建环境及对应硬件。
 
 ## FPGA 工程开发流程
 

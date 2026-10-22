@@ -97,6 +97,11 @@ The parallel job count can be specified explicitly:
 scripts/build_image.sh e200 --rebuild-fpga -j 8
 ```
 
+Kernel and U-Boot sub-builds inherit the outer Make job limit. The device
+tree is built after the kernel to avoid races on configuration and generated
+files. Each build rechecks the selected board's HDF, including when switching
+between E200 and E310V2 without cleaning `build/`.
+
 ## Building with Make
 
 If the tool environment has already been loaded manually, invoke Make
@@ -109,8 +114,8 @@ export PATH=/opt/Xilinx/SDK/2019.1/gnu/aarch32/lin/gcc-arm-linux-gnueabi/bin:$PA
 export CROSS_COMPILE=arm-linux-gnueabihf-
 
 cd firmware
-make TARGET=e200 image
-make TARGET=e310v2 image
+make -j8 TARGET=e200 image
+make -j8 TARGET=e310v2 image
 ```
 
 Common targets:
@@ -125,6 +130,21 @@ Common targets:
 | `make TARGET=e200 clean-build` | Remove firmware `build/` and `build_sdimg/` |
 
 The same targets support `TARGET=e310v2`.
+
+## Hardware-free regression checks
+
+From the repository root, run:
+
+```sh
+python3 -m unittest discover -s firmware/tests -v
+```
+
+These checks use temporary build trees and stub hardware commands to exercise
+parallel build ordering, job limits, HDF selection when changing boards,
+updater failure status, and service shutdown for both boards. They require
+Python 3, GNU Make, a host GCC, and standard shell tools; Xilinx tools and
+device access are not required. A complete firmware build and on-device
+validation still require the build environment above and the target hardware.
 
 ## FPGA development workflow
 

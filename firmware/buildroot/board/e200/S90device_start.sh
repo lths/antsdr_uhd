@@ -14,8 +14,8 @@ case "$1" in
 
 	stop)
 		echo -n "Stopping device stop: "
-		start-stop-daemon --stop --name /sbin/e200
-		start-stop-daemon --stop --name /sbin/net_set
+		start-stop-daemon --stop --name e200
+		start-stop-daemon --stop --name net_set
 		[ $? = 0 ] && echo "OK" || echo "FAIL"
 		;;
 

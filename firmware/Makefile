@@ -15,7 +15,6 @@ TOOLCHAIN2 = $(shell dirname $(TOOLCHAIN))
 TOOLCHAIN_PATH = $(shell dirname $(TOOLCHAIN2))
 
 
-NCORES = $(shell grep -c ^processor /proc/cpuinfo)
 VIVADO_SETTINGS ?= /opt/Xilinx/Vivado/$(VIVADO_VERSION)/settings64.sh
 VSUBDIRS = hdl buildroot linux u-boot-xlnx
 
@@ -69,8 +68,8 @@ build:
 
 ## uboot make
 u-boot-xlnx/u-boot u-boot-xlnx/tools/mkimage:
-	make -C u-boot-xlnx ARCH=arm zynq_$(TARGET)_defconfig
-	make -C u-boot-xlnx  -j $(NCORES) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) UBOOTVERSION="$(UBOOT_VERSION)"
+	$(MAKE) -C u-boot-xlnx ARCH=arm zynq_$(TARGET)_defconfig
+	$(MAKE) -C u-boot-xlnx ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) UBOOTVERSION="$(UBOOT_VERSION)"
 
 .PHONY: u-boot-xlnx/u-boot
 
@@ -83,9 +82,9 @@ build/uboot-env.txt: build/u-boot.elf | build
 
 ## linux uImage
 linux/arch/arm/boot/uImage: 
-	make -C linux ARCH=arm zynq_$(TARGET)_defconfig
-	make -C linux ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) olddefconfig
-	make -C linux -j $(NCORES) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) uImage UIMAGE_LOADADDR=0x8000
+	$(MAKE) -C linux ARCH=arm zynq_$(TARGET)_defconfig
+	$(MAKE) -C linux ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) olddefconfig
+	$(MAKE) -C linux ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) uImage UIMAGE_LOADADDR=0x8000
 
 
 .PHONY: linux/arch/arm/boot/uImage
@@ -96,8 +95,10 @@ build/uImage: linux/arch/arm/boot/uImage | build
 ## device tree
 # Make the DTB follow its source.  Without this prerequisite an existing DTB
 # can silently survive a DTS change and be copied into the next SD image.
-linux/arch/arm/boot/dts/zynq-$(TARGET).dtb: linux/arch/arm/boot/dts/zynq-$(TARGET).dts
-	make -C linux -j $(NCORES) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) zynq-${TARGET}.dtb
+# Wait for the kernel build (including defconfig/olddefconfig) before entering
+# Kbuild again. Concurrent kernel and DTB sub-makes can race on generated files.
+linux/arch/arm/boot/dts/zynq-$(TARGET).dtb: linux/arch/arm/boot/dts/zynq-$(TARGET).dts linux/arch/arm/boot/uImage
+	$(MAKE) -C linux ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) zynq-${TARGET}.dtb
 
 # build/device_tree.dtb is shared by all products, so always refresh it when
 # switching TARGET between E200 and E310V2.
@@ -133,10 +134,15 @@ FPGA_HDF_CANDIDATES := $(FPGA_ARTIFACT_DIR)/system_top.hdf \
 FPGA_HDF := $(shell ls -t $(FPGA_HDF_CANDIDATES) 2>/dev/null | head -n 1)
 
 ## hdf
-build/system_top.hdf: $(FPGA_HDF) | build
+# Recheck the selected board even if its HDF is older than the shared copy.
+# Only replace changed contents so unchanged hardware does not rebuild the FSBL.
+.PHONY: force-hdf
+force-hdf:
+
+build/system_top.hdf: $(FPGA_HDF) force-hdf | build
 	@hdf="$(FPGA_HDF)"; \
 	if [ -z "$$hdf" ]; then \
-		bash -c "source $(VIVADO_SETTINGS) && make -C $(FPGA_DIR) -j $(NCORES)"; \
+		bash -c "source $(VIVADO_SETTINGS) && $(MAKE) -C $(FPGA_DIR)" || exit $$?; \
 		hdf=$$(ls -t $(FPGA_HDF_CANDIDATES) 2>/dev/null | head -n 1); \
 	fi; \
 	if [ -z "$$hdf" ]; then \
@@ -144,7 +150,7 @@ build/system_top.hdf: $(FPGA_HDF) | build
 		exit 1; \
 	fi; \
 	echo "Using existing $$hdf"; \
-	cp "$$hdf" $@
+	if ! cmp -s "$$hdf" $@; then cp "$$hdf" $@; fi
 
 ## bit
 build/system_top.bit : build/system_top.hdf
@@ -187,6 +193,6 @@ clean-build:
 
 
 clean: clean-build
-	make -C linux ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) distclean
-	make -C u-boot-xlnx ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) distclean
-	make -C fpga/antsdr_$(TARGET) clean
+	$(MAKE) -C linux ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) distclean
+	$(MAKE) -C u-boot-xlnx ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) distclean
+	$(MAKE) -C fpga/antsdr_$(TARGET) clean
