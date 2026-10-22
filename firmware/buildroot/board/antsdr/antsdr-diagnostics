@@ -18,7 +18,8 @@ run cat /opt/VERSIONS
 section 'Device service'
 run /etc/init.d/S90device_start.sh status
 section 'Network'
-run ip -s link show dev eth0
+run ip link show dev eth0
+run cat /proc/net/dev
 run ip -4 addr show dev eth0
 run ip route show
 run ethtool eth0

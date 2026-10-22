@@ -16,6 +16,7 @@ class RuntimeTest(SandboxTest):
         replacements = {
             '/usr/lib/antsdr/persistence.sh': str(self.root / 'persistence.sh'),
             '/proc/mounts': str(self.root / 'mounts'),
+            '/proc/net/dev': str(self.root / 'net-dev'),
             '/mnt/jffs2': str(self.root / 'persistent'),
             '/etc': str(self.root / 'etc'),
             '/root/.ssh': str(self.root / 'ssh'),
@@ -262,6 +263,21 @@ class PersistenceTest(RuntimeTest):
 
 
 class DiagnosticsTest(RuntimeTest):
+    def test_network_report_uses_busybox_supported_commands(self):
+        self.write('mounts', '')
+        self.write('net-dev', 'eth0: 1234 bytes 12 packets\n')
+        self.write('bin/ip', '''
+            #!/bin/sh
+            case "$1" in
+                link|-4|route) echo 'network command supported' ;;
+                *) echo 'unsupported ip option'; exit 1 ;;
+            esac
+        ''', executable=True)
+        script = self.redirect(FIRMWARE / 'buildroot/board/antsdr/antsdr-diagnostics', 'diagnostics')
+        output = self.run_command(['sh', str(script)]).stdout
+        self.assertIn('eth0: 1234 bytes 12 packets', output)
+        self.assertNotIn('unsupported ip option', output)
+
     def test_missing_optional_tools_do_not_abort_report(self):
         source = FIRMWARE / 'buildroot/board/antsdr/antsdr-diagnostics'
         self.write('mounts', '')
