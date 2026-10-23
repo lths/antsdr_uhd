@@ -30,7 +30,10 @@ The NIC driver owns all management MMIO and exposes only these files under
 | `antsdr_enable` | Root write | Exactly zero or one |
 | `antsdr_lease` | Root write | Hexadecimal owner IPv4 and decimal timeout, bounded to 3000 ms |
 
-The driver and runtime require signature `0x414d4731` (`AMG1`) and ABI
+The driver first checks the existing MAC-enable register's readback for marker
+`0x414d4700` (with bit 0 retaining its enable meaning). Older FPGA images return
+no marker, so the driver avoids reads of unsupported addresses and their AXI
+bus errors. The driver and runtime then require signature `0x414d4731` (`AMG1`) and ABI
 `0x00010000`. Incompatible FPGA images leave the management API unavailable and
 produce a kernel error; the daemons fail startup instead of enabling unknown
 register layouts. The NIC can still serve Linux networking for recovery.

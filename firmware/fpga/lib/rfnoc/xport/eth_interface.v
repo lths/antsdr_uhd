@@ -221,7 +221,7 @@ module eth_interface #(
           reg_rd_data <= {16'b0,mac_reg[47:32]};
 
         REG_MAC_MASK:
-          reg_rd_data <= mac_mask;
+          reg_rd_data <= REQUIRE_LEASE ? (32'h414d4700 | {31'd0,mac_mask[0]}) : mac_mask;
 
         REG_IP:
           reg_rd_data <= ip_reg;

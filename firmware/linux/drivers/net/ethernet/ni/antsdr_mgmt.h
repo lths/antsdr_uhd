@@ -16,7 +16,11 @@
 
 static bool antsdr_compatible(struct nixge_priv *p)
 {
-	return nixge_ctrl_read_reg(p, ANTSDR_SIGNATURE) == ANTSDR_MAGIC &&
+	/* MAC_MASK exists in vendor FPGA images. Never probe a new address
+	 * until this known register advertises the management extension: an
+	 * unknown register produces AXI SLVERR, unsafe for a kernel readl(). */
+	return (nixge_ctrl_read_reg(p, NIXGE_REG_MAC_MASK) & ~1U) == 0x414d4700 &&
+	       nixge_ctrl_read_reg(p, ANTSDR_SIGNATURE) == ANTSDR_MAGIC &&
 	       nixge_ctrl_read_reg(p, ANTSDR_ABI_REG) == ANTSDR_ABI;
 }
 
@@ -31,11 +35,12 @@ static ssize_t antsdr_status_show(struct device *dev,
 	struct nixge_priv *p = antsdr_priv(dev);
 	ssize_t n;
 	mutex_lock(&p->antsdr_lock);
+	if (!antsdr_compatible(p)) { mutex_unlock(&p->antsdr_lock); return -EPROTO; }
 	n = scnprintf(buf, PAGE_SIZE, "%08x %08x %08x %u %08x %u %u\n",
 		nixge_ctrl_read_reg(p, ANTSDR_SIGNATURE),
 		nixge_ctrl_read_reg(p, ANTSDR_ABI_REG),
 		nixge_ctrl_read_reg(p, ANTSDR_IP),
-		nixge_ctrl_read_reg(p, NIXGE_REG_MAC_MASK),
+		nixge_ctrl_read_reg(p, NIXGE_REG_MAC_MASK) & 1,
 		nixge_ctrl_read_reg(p, ANTSDR_OWNER),
 		nixge_ctrl_read_reg(p, ANTSDR_TIMEOUT),
 		nixge_ctrl_read_reg(p, ANTSDR_EXPIRED));
@@ -95,7 +100,7 @@ static ssize_t antsdr_lease_store(struct device *dev,
 	mutex_lock(&p->antsdr_lock);
 	if (!antsdr_compatible(p)) { mutex_unlock(&p->antsdr_lock); return -EPROTO; }
 	if (ms && (!nixge_ctrl_read_reg(p, ANTSDR_IP) ||
-	    nixge_ctrl_read_reg(p, NIXGE_REG_MAC_MASK) != 1)) {
+	    (nixge_ctrl_read_reg(p, NIXGE_REG_MAC_MASK) & 1) != 1)) {
 		mutex_unlock(&p->antsdr_lock); return -ENETDOWN;
 	}
 	if (ms && ip == nixge_ctrl_read_reg(p, ANTSDR_OWNER) &&
