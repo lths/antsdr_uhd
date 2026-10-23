@@ -5,11 +5,37 @@ boot=/mnt/antsdr-boot
 state=/mnt/antsdr-state
 image=$boot/antsdr-state.ext4
 mounted() { awk -v path="$1" '$2 == path {found=1} END {exit !found}' /proc/mounts; }
+wait_for_card() {
+    attempt=0
+    while [ ! -b /dev/mmcblk0p1 ]; do
+        attempt=$((attempt+1)); [ "$attempt" -le 5 ] || return 1
+        sleep 1
+    done
+}
+prepare_card() {
+    wait_for_card && return 0
+    # Some cards remain busy after a warm reset. Retry this controller once,
+    # only when no card was enumerated and no SD-backed filesystem is mounted.
+    driver=/sys/bus/platform/drivers/sdhci-arasan
+    if [ ! -e /sys/block/mmcblk0 ] && [ ! -b /dev/mmcblk0 ] &&
+        ! awk '$1 ~ /^\/dev\/(mmcblk|loop)/ {found=1} END {exit !found}' /proc/mounts &&
+        [ -e "$driver/e0100000.mmc" ]; then
+        echo 'Retrying SD controller initialization'
+        printf e0100000.mmc > "$driver/unbind"
+        printf e0100000.mmc > "$driver/bind"
+        wait_for_card && return 0
+    fi
+    echo 'SD boot partition unavailable; persistent settings cannot be restored' >&2
+    return 1
+}
 case "${1:-start}" in
  start)
     mounted "$state" && exit 0
     install -d -m 0700 "$boot" "$state"
-    mounted "$boot" || mount -t vfat -o rw,umask=077,nodev,nosuid,noexec /dev/mmcblk0p1 "$boot"
+    if ! mounted "$boot"; then
+        prepare_card
+        mount -t vfat -o rw,umask=077,nodev,nosuid,noexec /dev/mmcblk0p1 "$boot"
+    fi
     [ -f "$boot/BOOT.bin" ] && [ -f "$boot/uImage" ] || exit 1
     # Preserve working legacy flash credentials; do not format or migrate flash.
     if [ -b /dev/mtdblock2 ]; then
@@ -37,6 +63,11 @@ case "${1:-start}" in
     if mounted "$state"; then umount "$state"; fi
     if mounted "$boot"; then umount "$boot"; fi
     ;;
- status) mounted "$state" ;;
+ status)
+    mounted "$boot" &&
+    awk '$2 == "/mnt/antsdr-state" && $3 == "ext4" && $4 ~ /(^|,)rw(,|$)/ {found=1}
+         $2 == "/mnt/jffs2" && $3 == "jffs2" && $4 ~ /(^|,)rw(,|$)/ {found=1}
+         END {exit !found}' /proc/mounts
+    ;;
  *) echo "Usage: $0 {start|stop|status}" >&2; exit 2 ;;
 esac

@@ -134,19 +134,22 @@ def trust_console(host, serial_path, known_hosts, password=None):
     stage = 'initial'
     with serial.Serial(serial_path, 115200, timeout=0.1) as port:
         port.write(b'\r')
-        deadline = time.monotonic()+25
+        port.flush()
+        last_prompt = time.monotonic()
+        deadline = time.monotonic()+45
         while time.monotonic() < deadline:
             buffer += port.read(65536).decode(errors='replace').replace('\r', '')
             if re.search(r'login:\s*$', buffer):
                 if stage not in ('initial',):
                     raise RuntimeError('Console authentication failed')
-                port.write(b'root\r'); stage='username'; buffer=''
+                port.write(b'root\r'); port.flush(); stage='username'; buffer=''
             elif re.search(r'Password:\s*$', buffer):
                 if stage != 'username' or password is None:
                     raise RuntimeError('Console login requires the password supplied through --password-env')
-                port.write(password.encode()+b'\r'); stage='password'; buffer=''
+                port.write(password.encode()+b'\r'); port.flush(); stage='password'; buffer=''
             elif stage != 'command' and re.search(r'(?:^|\n)[^\n]*# ?$', buffer):
                 port.write(b'dropbearkey -y -f /etc/dropbear/dropbear_ecdsa_host_key; echo __HOST_KEY_DONE__\r')
+                port.flush()
                 stage='command'; buffer=''
             if stage == 'command' and '\n__HOST_KEY_DONE__\n' in buffer:
                 match = re.search(r'^ecdsa-sha2-nistp256 ([A-Za-z0-9+/=]+)(?: |$)', buffer, re.M)
@@ -160,7 +163,12 @@ def trust_console(host, serial_path, known_hosts, password=None):
                 hosts.add(host, key.get_name(), key)
                 hosts.save(str(path)); path.chmod(0o600)
                 port.write(b'exit\r')
+                port.flush()
                 return {'host':host, 'key_type':key.get_name(), 'fingerprint_sha256':base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip('=')}
+            # A discovery reply can precede getty startup. Its terminal setup may
+            # discard the first CR; never refresh after authentication has begun.
+            if stage == 'initial' and time.monotonic()-last_prompt >= 1:
+                port.write(b'\r'); port.flush(); last_prompt=time.monotonic()
         raise TimeoutError('Timed out verifying the SSH host key over serial')
 
 
@@ -194,7 +202,12 @@ def health(connection):
     command_line = connection.run('cat /proc/cmdline')
     match = re.search(r'(?:^| )antsdr\.slot=(a|b|root)(?: |$)', command_line.strip())
     current['boot_slot'] = match[1] if match else 'legacy'
-    current['confirmed_slot'] = connection.run('cat '+BOOT+'/antsdr-active 2>/dev/null', check=False).strip() or 'root'
+    boot_ready = connection.run('mountpoint -q '+BOOT+' && printf ready', check=False).strip() == 'ready'
+    boot_ready = boot_ready and current.get('boot_storage_ready', True)
+    current['boot_storage_ready'] = boot_ready
+    current['confirmed_slot'] = (connection.run('cat '+BOOT+'/antsdr-active 2>/dev/null', check=False).strip() or 'root') if boot_ready else None
+    if current['boot_slot'] in ('a', 'b') and not boot_ready:
+        current['healthy'] = False
     current['trial_slot'] = connection.run('cat '+BOOT+'/antsdr-trial 2>/dev/null', check=False).strip() or None
     return current
 

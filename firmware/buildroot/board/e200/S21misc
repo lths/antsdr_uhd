@@ -30,6 +30,7 @@ restore_authorized_keys() {
 
 case "$1" in
 	start|"")
+		rm -f /run/antsdr-persistence-ready
 		if ! persist_mounted; then
 			echo 'Persistent storage unavailable; keeping current credentials'
 			exit 0
@@ -45,6 +46,9 @@ case "$1" in
 				result=1
 			fi
 		done
+		if [ "$result" -eq 0 ]; then
+			touch /run/antsdr-persistence-ready || result=1
+		fi
 		exit "$result"
 		;;
 	stop) exit 0 ;;

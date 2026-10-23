@@ -4,6 +4,10 @@ boot=/mnt/antsdr-boot
 case "${1:-start}" in start) ;; stop) exit 0 ;; *) exit 2 ;; esac
 slot=$(sed -n 's/.*antsdr\.slot=\([^ ]*\).*/\1/p' /proc/cmdline)
 case "$slot" in a|b) ;; *) exit 0 ;; esac
+if ! awk -v path="$boot" '$2 == path && $3 == "vfat" && $4 ~ /(^|,)rw(,|$)/ {found=1} END {exit !found}' /proc/mounts; then
+    logger -t antsdr-boot 'Boot storage unavailable; slot confirmation cannot run'
+    exit 1
+fi
 [ -f "$boot/antsdr-trial" ] || exit 0
 trial=$(cat "$boot/antsdr-trial")
 [ "$trial" = "$slot" ] || exit 0

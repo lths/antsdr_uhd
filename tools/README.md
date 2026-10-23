@@ -99,7 +99,11 @@ checksummed snapshot in private device storage. The E200 uses a 64 MiB ext4 imag
 `antsdr-state.ext4` on the existing FAT partition, mounted at `/mnt/antsdr-state`.
 This preserves the SD partition table. A working existing JFFS2 store retains
 priority. Settings and SSH keys have Unix permissions inside the private
-filesystem; the storage image is not encrypted. The initial automatic MAC is
+filesystem; the storage image is not encrypted. Startup waits for the card and
+retries its unmounted controller once if Linux cannot enumerate it after a warm
+reset. Health exposes `boot_storage_ready`, `persistent_storage_ready` and
+`settings_restored`; missing storage prevents successful trial confirmation and
+automatic saving of temporary SSH keys. The initial automatic MAC is
 derived from the SD card CID and persisted; moving to a different card requires
 copying the settings image to retain the identity. It is not a factory MAC.
 

@@ -105,6 +105,32 @@ def release(root):
 
 
 class ReleaseTest(unittest.TestCase):
+    def test_console_trust_refreshes_a_prompt_discarded_during_startup(self):
+        class Port:
+            def __init__(self):self.queue=[];self.refreshes=0;self.writes=[]
+            def __enter__(self):return self
+            def __exit__(self,*args):pass
+            def flush(self):pass
+            def read(self,size):return self.queue.pop(0) if self.queue else b''
+            def write(self,value):
+                self.writes.append(value)
+                if value==b'\r':
+                    self.refreshes+=1
+                    if self.refreshes>1:self.queue.append(b'ant login: ')
+                elif value==b'root\r':self.queue.append(b'Password: ')
+                elif value==b'test-password\r':self.queue.append(b'\n# ')
+                elif value.startswith(b'dropbearkey'):
+                    self.queue.append(b'ecdsa-sha2-nistp256 a2V5 root@ant\n__HOST_KEY_DONE__\n# ')
+        port=Port();fake=MagicMock()
+        key=fake.ECDSAKey.return_value;key.get_name.return_value='ecdsa-sha2-nistp256';key.asbytes.return_value=b'key'
+        fake.HostKeys.return_value.save.side_effect=lambda path:Path(path).write_text('public host key\n')
+        ticks=iter(n/5 for n in range(1000))
+        with tempfile.TemporaryDirectory() as root, patch.dict('sys.modules',{'paramiko':fake,'serial':MagicMock(Serial=MagicMock(return_value=port))}), patch('antsdr.ops.socket.create_connection'), patch('antsdr.ops.time.monotonic',side_effect=lambda:next(ticks)):
+            result=ops.trust_console('192.168.1.10','/dev/test',Path(root)/'known_hosts','test-password')
+            self.assertEqual(result['key_type'],'ecdsa-sha2-nistp256')
+            self.assertGreaterEqual(port.refreshes,2)
+            self.assertNotIn('test-password',(Path(root)/'known_hosts').read_text())
+
     def test_legacy_fallback_health_remains_observable(self):
         class Connection:
             host='192.168.1.10'
@@ -119,6 +145,16 @@ class ReleaseTest(unittest.TestCase):
             status=ops.health(Connection())
         self.assertTrue(status['healthy']);self.assertTrue(status['legacy_health'])
         self.assertEqual(status['boot_slot'],'root')
+
+    def test_missing_boot_mount_does_not_claim_original_slot(self):
+        class Connection:
+            def run(self,command,**kwargs):
+                return {'/usr/sbin/antsdr-health --json':'{"healthy":true}',
+                        'cat /proc/cmdline':'antsdr.slot=b panic=10'}.get(command,'')
+        status=ops.health(Connection())
+        self.assertFalse(status['healthy'])
+        self.assertIsNone(status['confirmed_slot'])
+        self.assertFalse(status['boot_storage_ready'])
 
     def test_release_integrity_and_path_validation(self):
         with tempfile.TemporaryDirectory() as folder:

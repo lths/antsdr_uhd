@@ -107,10 +107,28 @@ static unsigned long counter(const char *name) {
     if (read_text(path, buffer, sizeof(buffer)) < 0) return 0;
     return strtoul(buffer, NULL, 10);
 }
-struct health { bool radio, network, discovery, link, maintenance; };
+static bool mounted_rw(const char *path, const char *type) {
+    FILE *f = fopen(PATH("/proc/mounts"), "r");
+    if (!f) return false;
+    char line[1024], source[256], target[256], fs[64], options[256];
+    bool found = false;
+    while (fgets(line, sizeof(line), f)) {
+        if (sscanf(line, "%255s %255s %63s %255s", source, target, fs, options) != 4) continue;
+        if (strcmp(target, path) || strcmp(fs, type)) continue;
+        char *save = NULL;
+        for (char *part = strtok_r(options, ",", &save); part; part = strtok_r(NULL, ",", &save))
+            if (!strcmp(part, "rw")) found = true;
+    }
+    fclose(f);
+    return found;
+}
+struct health { bool radio, network, discovery, link, maintenance, boot, storage, restored; };
 static struct health check(void) {
     char carrier[8], address[INET_ADDRSTRLEN];
     struct health h = {0};
+    h.boot = mounted_rw("/mnt/antsdr-boot", "vfat");
+    h.storage = mounted_rw("/mnt/antsdr-state", "ext4") || mounted_rw("/mnt/jffs2", "jffs2");
+    h.restored = access(PATH("/run/antsdr-persistence-ready"), F_OK) == 0;
     h.radio = alive("e200") || alive("e310v2");
     h.network = alive("net_set");
     h.maintenance = access(PATH("/run/antsdr-maintenance"), F_OK) == 0;
@@ -118,7 +136,8 @@ static struct health check(void) {
     h.discovery = local_address(address, sizeof(address)) && probe(address);
     return h;
 }
-static bool healthy(struct health h) { return h.radio && h.network && h.discovery; }
+static bool radio_healthy(struct health h) { return h.radio && h.network && h.discovery; }
+static bool healthy(struct health h) { return radio_healthy(h) && h.boot && h.storage && h.restored; }
 static void report(FILE *out, struct health h, unsigned restarts, unsigned failures,
     bool limited) {
     char firmware[4096], mac[64], load[128], uptime[128], memory[4096];
@@ -139,6 +158,8 @@ static void report(FILE *out, struct health h, unsigned restarts, unsigned failu
         h.discovery?"true":"false",h.link?"true":"false",h.maintenance?"true":"false",
         restarts, failures, limited?"true":"false", atof(uptime), atof(load), available);
     string(out, mac);
+    fprintf(out, ",\"boot_storage_ready\":%s,\"persistent_storage_ready\":%s,\"settings_restored\":%s",
+        h.boot?"true":"false", h.storage?"true":"false", h.restored?"true":"false");
     fprintf(out, ",\"rx_errors\":%lu,\"tx_errors\":%lu,\"rx_dropped\":%lu,\"firmware\":%s}\n",
         counter("rx_errors"),counter("tx_errors"),counter("rx_dropped"),firmware);
 }
@@ -172,7 +193,7 @@ static int supervise(void) {
         if (now() >= next) {
             if (now()-window >= 600) { window=now(); window_restarts=0; }
             struct health h=check();
-            if (healthy(h) || h.maintenance || !h.link) failures=0;
+            if (radio_healthy(h) || h.maintenance || !h.link) failures=0;
             else failures++;
             if (failures >= 3 && window_restarts < 3) {
                 restarts++; window_restarts++;
@@ -181,7 +202,7 @@ static int supervise(void) {
                 syslog(result?LOG_ERR:LOG_NOTICE, "Recovery completed with status %d", result);
                 failures=0; h=check();
             }
-            if (!keys_saved && access(PATH("/etc/dropbear/dropbear_ecdsa_host_key"),R_OK)==0)
+            if (!keys_saved && h.storage && h.restored && access(PATH("/etc/dropbear/dropbear_ecdsa_host_key"),R_OK)==0)
                 keys_saved=run_program(PATH("/usr/sbin/device_persistent_keys"),NULL)==0;
             FILE *out=fopen(PATH("/run/antsdr-health.json.new"), "w");
             if (out) {

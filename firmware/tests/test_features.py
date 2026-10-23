@@ -84,9 +84,69 @@ class IdentityTest(RuntimeTest):
         self.assertFalse((self.root/'ip-calls').exists())
 
 
+class StorageStartupTest(RuntimeTest):
+    def setUp(self):
+        super().setUp()
+        self.write('mounts','')
+        self.write('sd-boot/BOOT.bin','original bootloader')
+        self.write('sd-boot/uImage','original kernel')
+        self.write('sd-boot/antsdr-state.ext4','existing private settings')
+        self.write('driver/e0100000.mmc','')
+        self.write('driver/bind','');self.write('driver/unbind','')
+        self.write('bin/sync','#!/bin/sh\nexit 0\n',executable=True)
+        self.write('bin/mkfs.ext4','#!/bin/sh\nexit 99\n',executable=True)
+        self.write('bin/sleep',f'''#!/bin/sh
+            if [ "$CARD_MODE" = late ] || {{ [ "$CARD_MODE" = retry ] && [ -s "{self.root}/driver/bind" ]; }}; then
+                touch "{self.root}/cardp1"
+            fi
+        ''',executable=True)
+        self.write('bin/mount',f'''#!/bin/sh
+            case "$2" in
+                vfat) printf '/dev/mmcblk0p1 {self.root}/sd-boot vfat rw 0 0\\n' >> "{self.root}/mounts" ;;
+                ext4) printf '/dev/loop0 {self.root}/sd-state ext4 rw 0 0\\n' >> "{self.root}/mounts" ;;
+                *) exit 99 ;;
+            esac
+        ''',executable=True)
+        text=(FIRMWARE/'buildroot/board/antsdr/S19storage').read_text()
+        text=text.replace('[ ! -b /dev/mmcblk0p1 ]',f'[ ! -e {self.root}/cardp1 ]')
+        text=text.replace('[ ! -b /dev/mmcblk0 ]',f'[ ! -e {self.root}/card ]')
+        text=text.replace('/sys/block/mmcblk0',str(self.root/'sys-card'))
+        text=text.replace('/sys/bus/platform/drivers/sdhci-arasan',str(self.root/'driver'))
+        self.script=self.redirect(self.write('storage-source',text),'storage')
+        self.env['CARD_MODE']='missing'
+
+    def test_late_card_is_waited_for_without_reset_or_format(self):
+        self.env['CARD_MODE']='late'
+        self.run_command(['sh',str(self.script),'start'])
+        self.assertEqual((self.root/'driver/unbind').read_text(),'')
+        self.assertEqual((self.root/'sd-boot/antsdr-state.ext4').read_text(),'existing private settings')
+        self.run_command(['sh',str(self.script),'status'])
+
+    def test_unenumerated_card_gets_one_controller_retry(self):
+        self.env['CARD_MODE']='retry'
+        self.run_command(['sh',str(self.script),'start'])
+        self.assertEqual((self.root/'driver/unbind').read_text(),'e0100000.mmc')
+        self.assertEqual((self.root/'driver/bind').read_text(),'e0100000.mmc')
+
+    def test_failed_retry_is_bounded_and_does_not_create_settings(self):
+        self.run_command(['sh',str(self.script),'start'],success=False)
+        self.assertEqual((self.root/'driver/bind').read_text(),'e0100000.mmc')
+        self.assertFalse((self.root/'sd-boot/antsdr-state.ext4.new').exists())
+
+    def test_enumerated_card_or_mounted_loop_is_never_reset(self):
+        for protected in ('card','sys-card','loop-mount'):
+            with self.subTest(protected=protected):
+                if protected=='loop-mount':self.write('mounts','/dev/loop1 /other ext4 rw 0 0\n')
+                else:self.write(protected,'')
+                self.run_command(['sh',str(self.script),'start'],success=False)
+                self.assertEqual((self.root/'driver/unbind').read_text(),'')
+                (self.root/protected).unlink(missing_ok=True)
+
+
 class BootConfirmationTest(RuntimeTest):
     def setUp(self):
         super().setUp()
+        self.write('mounts',f'/dev/mmcblk0p1 {self.root}/sd-boot vfat rw 0 0\n')
         self.write('cmdline','console=test antsdr.slot=a panic=10\n')
         self.write('sd-boot/antsdr-trial','a')
         self.write('sd-boot/antsdr-attempted','1')
@@ -121,6 +181,13 @@ class BootConfirmationTest(RuntimeTest):
                 self.assertTrue((self.root/'sd-boot/antsdr-trial').exists())
                 self.assertTrue((self.root/'rebooted').exists())
 
+    def test_unmounted_boot_storage_is_reported_without_publishing(self):
+        self.write('mounts','')
+        self.run_command(['sh',str(self.script),'start'],success=False)
+        self.assertEqual((self.root/'sd-boot/antsdr-active').read_text(),'b')
+        self.assertTrue((self.root/'sd-boot/antsdr-trial').exists())
+        self.assertFalse((self.root/'rebooted').exists())
+
     def test_fallback_boot_never_confirms_the_failed_trial(self):
         self.write('cmdline','antsdr.slot=b panic=10\n')
         self.run_command(['sh',str(self.script),'start'])
@@ -150,6 +217,33 @@ class HealthTest(SandboxTest):
         self.assertFalse(report['healthy']);self.assertFalse(report['radio_running'])
         self.assertEqual(report['firmware']['board'],'e200')
         self.assertEqual(report['memory_available_kb'],1234)
+
+    def test_storage_health_requires_writable_mounts_and_restoration(self):
+        self.write('proc/mounts','/dev/mmcblk0p1 /mnt/antsdr-boot vfat rw,nodev 0 0\n/dev/loop0 /mnt/antsdr-state ext4 rw 0 0\n')
+        self.write('run/antsdr-persistence-ready','')
+        report=json.loads(self.run_command([str(self.binary),'--json'],success=False).stdout)
+        self.assertTrue(report['boot_storage_ready']);self.assertTrue(report['persistent_storage_ready'])
+        self.assertTrue(report['settings_restored'])
+        self.write('proc/mounts','/dev/mmcblk0p1 /mnt/antsdr-boot vfat ro 0 0\n')
+        (self.root/'run/antsdr-persistence-ready').unlink()
+        report=json.loads(self.run_command([str(self.binary),'--json'],success=False).stdout)
+        self.assertFalse(report['boot_storage_ready']);self.assertFalse(report['persistent_storage_ready'])
+        self.assertFalse(report['settings_restored'])
+
+    def test_unrestored_credentials_are_not_automatically_saved(self):
+        self.write('proc/mounts','/dev/loop0 /mnt/antsdr-state ext4 rw 0 0\n')
+        self.write('etc/dropbear/dropbear_ecdsa_host_key','temporary-key')
+        self.write('usr/sbin/device_persistent_keys',f'#!/bin/sh\ntouch "{self.root}/keys-saved"\n',executable=True)
+        process=subprocess.Popen([str(self.binary),'--supervise'],stdout=subprocess.DEVNULL)
+        try:
+            time.sleep(0.15)
+            self.assertFalse((self.root/'keys-saved').exists())
+            self.write('run/antsdr-persistence-ready','')
+            deadline=time.monotonic()+2
+            while not (self.root/'keys-saved').exists() and time.monotonic()<deadline:time.sleep(0.02)
+            self.assertTrue((self.root/'keys-saved').exists())
+        finally:
+            process.terminate();process.wait(timeout=2)
 
     def test_recovery_is_bounded_and_maintenance_suppresses_restarts(self):
         for maintenance in (False,True):

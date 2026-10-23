@@ -220,6 +220,7 @@ class PersistenceTest(RuntimeTest):
                 restore = self.script(board, 'S21misc')
                 self.run_command(['sh', str(restore), 'start'])
                 self.run_command(['sh', str(restore), 'start'])
+                self.assertTrue((self.root / 'run/antsdr-persistence-ready').exists())
                 self.assertIn('secret', (self.root / 'etc/shadow').read_text())
                 self.assertEqual((self.root / 'etc/dropbear/dropbear_ecdsa_host_key').read_text(), 'private-key')
                 self.assertEqual((self.root / 'ssh/authorized_keys').read_text(), 'public-key')
@@ -252,8 +253,10 @@ class PersistenceTest(RuntimeTest):
             self.run_command(['sh', str(self.script(board, 'device_passwd'))])
             (self.snapshot('passwords') / 'shadow').write_text('corrupt')
             self.write('etc/shadow', 'current')
+            self.write('run/antsdr-persistence-ready', '')
             self.run_command(['sh', str(self.script(board, 'S21misc')), 'start'], success=False)
             self.assertEqual((self.root / 'etc/shadow').read_text(), 'current')
+            self.assertFalse((self.root / 'run/antsdr-persistence-ready').exists())
 
     def test_legacy_credentials_are_still_restored(self):
         self.mounted()
