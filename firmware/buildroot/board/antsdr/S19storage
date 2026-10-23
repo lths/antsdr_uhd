@@ -1,0 +1,42 @@
+#!/bin/sh
+# Private ext4 filesystem in a regular SD file; preserves the partition table.
+set -eu
+boot=/mnt/antsdr-boot
+state=/mnt/antsdr-state
+image=$boot/antsdr-state.ext4
+mounted() { awk -v path="$1" '$2 == path {found=1} END {exit !found}' /proc/mounts; }
+case "${1:-start}" in
+ start)
+    mounted "$state" && exit 0
+    install -d -m 0700 "$boot" "$state"
+    mounted "$boot" || mount -t vfat -o rw,umask=077,nodev,nosuid,noexec /dev/mmcblk0p1 "$boot"
+    [ -f "$boot/BOOT.bin" ] && [ -f "$boot/uImage" ] || exit 1
+    # Preserve working legacy flash credentials; do not format or migrate flash.
+    if [ -b /dev/mtdblock2 ]; then
+        install -d -m 0700 /mnt/jffs2
+        if mounted /mnt/jffs2 || mount -t jffs2 /dev/mtdblock2 /mnt/jffs2; then
+            echo 'Using existing JFFS2 settings'
+            exit 0
+        fi
+    fi
+    if [ ! -f "$image" ]; then
+        available=$(df -Pk "$boot" | awk 'END {print $4}')
+        [ "$available" -gt 131072 ] || { echo 'Insufficient SD space for settings' >&2; exit 1; }
+        dd if=/dev/zero of="$image.new" bs=1048576 count=64
+        mkfs.ext4 -q -F "$image.new"
+        sync
+        mv "$image.new" "$image"
+        sync
+    fi
+    mount -t ext4 -o loop,nodev,nosuid,noexec "$image" "$state"
+    chmod 0700 "$state"
+    echo 'Private SD settings mounted'
+    ;;
+ stop)
+    sync
+    if mounted "$state"; then umount "$state"; fi
+    if mounted "$boot"; then umount "$boot"; fi
+    ;;
+ status) mounted "$state" ;;
+ *) echo "Usage: $0 {start|stop|status}" >&2; exit 2 ;;
+esac

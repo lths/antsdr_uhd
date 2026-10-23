@@ -155,6 +155,17 @@ macro(UHD_ADD_RFNOC_BLOCK_TEST)
     )
 endmacro(UHD_ADD_RFNOC_BLOCK_TEST)
 
+if(ENABLE_ANT)
+    UHD_ADD_NONAPI_TEST(
+        TARGET ant_control_test.cpp
+        EXTRA_SOURCES
+        ${CMAKE_SOURCE_DIR}/lib/usrp/cores/radio_ctrl_core_3000.cpp
+        ${CMAKE_SOURCE_DIR}/lib/usrp/cores/spi_core_3000.cpp
+        ${CMAKE_SOURCE_DIR}/lib/usrp/ant/ant_cores.cpp
+        ${CMAKE_SOURCE_DIR}/lib/usrp/common/adf4001_ctrl.cpp
+    )
+endif()
+
 ###############################################################################
 # Now add all unit tests that require special linkage
 ###############################################################################
@@ -365,6 +376,7 @@ UHD_ADD_RFNOC_BLOCK_TEST(
     TARGET window_block_test.cpp
 )
 
+if(ENABLE_MPMD)
 UHD_ADD_RFNOC_BLOCK_TEST(
     TARGET x4xx_radio_block_test.cpp
     EXTRA_SOURCES
@@ -387,6 +399,7 @@ UHD_ADD_RFNOC_BLOCK_TEST(
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/lib/deps/rpclib/include
     INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/lib/deps/flatbuffers/include
 )
+endif()
 
 UHD_ADD_NONAPI_TEST(
     TARGET "mb_controller_test.cpp"

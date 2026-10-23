@@ -48,6 +48,7 @@ def main():
     compiler = subprocess.check_output([args.compiler, '--version'], universal_newlines=True).splitlines()[0]
     info = {
         'schema_version': 1,
+        'boot_protocol': 1,
         'board': args.board,
         'source_revision': revision,
         'source_dirty': dirty,

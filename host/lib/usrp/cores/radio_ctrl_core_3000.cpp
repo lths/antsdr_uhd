@@ -17,6 +17,7 @@
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/thread.hpp>
 #include <functional>
+#include <chrono>
 #include <queue>
 
 using namespace uhd;
@@ -104,8 +105,7 @@ public:
         boost::mutex::scoped_lock lock(_mutex);
         _time     = time;
         _use_time = _time != uhd::time_spec_t(0.0);
-        if (_use_time)
-            _timeout = MASSIVE_TIMEOUT; // permanently sets larger timeout
+        _timeout = _use_time ? MASSIVE_TIMEOUT : ACK_TIMEOUT;
     }
 
     uhd::time_spec_t get_time(void) override
@@ -125,6 +125,7 @@ private:
     struct resp_buff_type
     {
         uint32_t data[8];
+        size_t bytes;
     };
 
     /*******************************************************************
@@ -169,8 +170,8 @@ private:
                                                           : uhd::htowx(data);
         // UHD_LOGGER_INFO("radio_ctrl") << boost::format("0x%08x, 0x%08x\n") % addr %
         // data; send the buffer over the interface
-        _outstanding_seqs.push(_seq_out);
         buff->commit(sizeof(uint32_t) * (packet_info.num_packet_words32));
+        _outstanding_seqs.push(_seq_out);
 
         _seq_out++; // inc seq for next call
     }
@@ -181,7 +182,6 @@ private:
             // get seq to ack from outstanding packets list
             UHD_ASSERT_THROW(not _outstanding_seqs.empty());
             const size_t seq_to_ack = _outstanding_seqs.front();
-            _outstanding_seqs.pop();
 
             // parse the packet
             vrt::if_packet_info_t packet_info;
@@ -195,7 +195,8 @@ private:
                 buff = _resp_xport->get_recv_buff(_timeout);
                 try {
                     UHD_ASSERT_THROW(bool(buff));
-                    UHD_ASSERT_THROW(buff->size() > 0);
+                    UHD_ASSERT_THROW(buff->size() >= 16 && buff->size() <= 32);
+                    UHD_ASSERT_THROW(buff->size() % sizeof(uint32_t) == 0);
                 } catch (const std::exception& ex) {
                     throw uhd::io_error(
                         str(boost::format("Radio ctrl (%s) no response packet - %s")
@@ -214,7 +215,8 @@ private:
                  * but could end up in dump_queue.
                  * If we don't get a message --> Die in timeout.
                  */
-                double accum_timeout       = 0.0;
+                const auto deadline = std::chrono::steady_clock::now()
+                    + std::chrono::duration<double>(_timeout);
                 const double short_timeout = 0.005; // == 5ms
                 while (
                     not((_resp_queue.pop_with_haste(resp_buff))
@@ -224,12 +226,12 @@ private:
                      * If a message couldn't be received within a given timeout
                      * --> throw AssertionError!
                      */
-                    accum_timeout += short_timeout;
-                    UHD_ASSERT_THROW(accum_timeout < _timeout);
+                    if (std::chrono::steady_clock::now() >= deadline)
+                        throw uhd::io_error("Radio ctrl response deadline expired");
                 }
 
                 pkt                            = resp_buff.data;
-                packet_info.num_packet_words32 = sizeof(resp_buff) / sizeof(uint32_t);
+                packet_info.num_packet_words32 = resp_buff.bytes / sizeof(uint32_t);
             }
 
             // parse the buffer
@@ -240,17 +242,7 @@ private:
                 else
                     vrt::if_hdr_unpack_le(pkt, packet_info);
             } catch (const std::exception& ex) {
-                UHD_LOGGER_ERROR("radio_ctrl")
-                    << "Radio ctrl bad VITA packet: " << ex.what();
-                if (buff) {
-                    UHD_VAR(buff->size());
-                } else {
-                    UHD_LOGGER_INFO("radio_ctrl") << "buff is NULL";
-                }
-                UHD_LOGGER_INFO("radio_ctrl") << std::hex << pkt[0] << std::dec;
-                UHD_LOGGER_INFO("radio_ctrl") << std::hex << pkt[1] << std::dec;
-                UHD_LOGGER_INFO("radio_ctrl") << std::hex << pkt[2] << std::dec;
-                UHD_LOGGER_INFO("radio_ctrl") << std::hex << pkt[3] << std::dec;
+                throw uhd::io_error(std::string("Radio ctrl malformed packet: ") + ex.what());
             }
 
             // check the buffer
@@ -261,12 +253,14 @@ private:
                 UHD_ASSERT_THROW(packet_info.packet_count == (seq_to_ack & 0xfff));
                 UHD_ASSERT_THROW(packet_info.num_payload_words32 == 2);
                 UHD_ASSERT_THROW(packet_info.packet_type == _packet_type);
+                UHD_ASSERT_THROW(packet_info.num_header_words32 + 2 <= packet_info.num_packet_words32);
             } catch (const std::exception& ex) {
                 throw uhd::io_error(
                     str(boost::format("Radio ctrl (%s) packet parse error - %s") % _name
                         % ex.what()));
             }
 
+            _outstanding_seqs.pop();
             // return the readback value
             if (readback and _outstanding_seqs.empty()) {
                 const uint64_t hi =
@@ -292,25 +286,33 @@ private:
      */
     bool check_dump_queue(resp_buff_type& b)
     {
-        const size_t min_buff_size =
-            8; // Same value as in b200_io_impl->handle_async_task
+        const size_t min_buff_size = 16;
+        if (!_async_task)
+            return false;
         uint32_t recv_sid = (((_sid) << 16) | ((_sid) >> 16));
         uhd::msg_task::msg_payload_t msg;
         do {
             msg = _async_task->get_msg_from_dump_queue(recv_sid);
         } while (msg.size() < min_buff_size && !msg.empty());
 
-        if (msg.size() >= min_buff_size) {
-            memcpy(b.data, &msg.front(), std::min(msg.size(), sizeof(b.data)));
+        if (msg.size() >= min_buff_size && msg.size() <= sizeof(b.data)
+            && msg.size() % sizeof(uint32_t) == 0) {
+            memset(&b, 0, sizeof(b));
+            memcpy(b.data, &msg.front(), msg.size());
+            b.bytes = msg.size();
             return true;
         }
         return false;
     }
 
-    void push_response(const uint32_t* buff) override
+    void push_response(const uint32_t* buff, size_t bytes) override
     {
-        resp_buff_type resp_buff;
-        std::memcpy(resp_buff.data, buff, sizeof(resp_buff));
+        if (!buff || bytes < 16 || bytes > sizeof(resp_buff_type::data)
+            || bytes % sizeof(uint32_t) != 0)
+            return;
+        resp_buff_type resp_buff{};
+        std::memcpy(resp_buff.data, buff, bytes);
+        resp_buff.bytes = bytes;
         _resp_queue.push_with_haste(resp_buff);
     }
 

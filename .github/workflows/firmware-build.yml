@@ -1,0 +1,32 @@
+name: Licensed firmware build
+on:
+  workflow_dispatch:
+    inputs:
+      board:
+        type: choice
+        options: [e200, e310v2]
+        default: e200
+      rebuild_fpga:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    # Opt in only on a trusted machine with accepted Xilinx licenses and tools.
+    runs-on: [self-hosted, linux, antsdr-xilinx-2019.1]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and verify image
+        env:
+          BOARD: ${{ inputs.board }}
+          REBUILD: ${{ inputs.rebuild_fpga }}
+        run: |
+          args=()
+          if [ "$REBUILD" = true ]; then args+=(--rebuild-fpga); fi
+          bash firmware/scripts/build_image.sh "$BOARD" -j 8 "${args[@]}"
+          PYTHONPATH=tools python3 -m antsdr verify firmware/build_sdimg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: antsdr-${{ inputs.board }}-${{ github.sha }}
+          path: firmware/build_sdimg/

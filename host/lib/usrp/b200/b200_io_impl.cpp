@@ -335,7 +335,7 @@ boost::optional<uhd::msg_task::msg_type_t> b200_impl::handle_async_task(
             if (sid == B200_LOCAL_RESP_SID)
                 ctrl = data->local_ctrl.lock();
             if (ctrl) {
-                ctrl->push_response(buff->cast<const uint32_t*>());
+                ctrl->push_response(buff->cast<const uint32_t*>(), buff->size());
             } else {
                 return std::make_pair(sid,
                     uhd::msg_task::buff_to_vector(buff->cast<uint8_t*>(), buff->size()));

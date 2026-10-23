@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+docker image inspect antsdr-host:22.04 >/dev/null 2>&1 || docker build -t antsdr-host:22.04 "$root/host/docker"
+devices=()
+if [ -e /dev/ttyUSB0 ]; then devices=(--device /dev/ttyUSB0 --group-add "$(stat -c %g /dev/ttyUSB0)"); fi
+exec docker run --rm --init --network host "${devices[@]}" \
+    --mount "type=bind,source=$root,target=/work" \
+    --env ANTSDR_PASSWORD antsdr-host:22.04 python3 -m antsdr "$@"

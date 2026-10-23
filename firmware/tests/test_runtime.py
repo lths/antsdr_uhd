@@ -19,6 +19,10 @@ class RuntimeTest(SandboxTest):
             '/proc/mounts': str(self.root / 'mounts'),
             '/proc/net/dev': str(self.root / 'net-dev'),
             '/mnt/jffs2': str(self.root / 'persistent'),
+            '/mnt/antsdr-state': str(self.root / 'sd-state'),
+            '/mnt/antsdr-boot': str(self.root / 'sd-boot'),
+            '/proc/cmdline': str(self.root / 'cmdline'),
+            '/usr/sbin/antsdr-health': str(self.bin / 'antsdr-health'),
             '/etc': str(self.root / 'etc'),
             '/root/.ssh': str(self.root / 'ssh'),
             '/run': str(self.root / 'run'),
@@ -30,6 +34,7 @@ class RuntimeTest(SandboxTest):
             '/sbin/e310v2': str(self.bin / 'e310v2'),
             '/bin/ping': str(self.bin / 'ping'),
             '/sbin/$DEVICE': str(self.bin / '$DEVICE'),
+            '/usr/sbin/antsdr-config': str(self.bin / 'antsdr-config'),
         }
         pattern = r'(?<![A-Za-z0-9_])(?:' + '|'.join(re.escape(key) for key in replacements) + ')'
         text = re.sub(pattern, lambda match: replacements[match.group()], text)
@@ -295,7 +300,7 @@ class DiagnosticsTest(RuntimeTest):
 
 class PostBuildTest(SandboxTest):
     def test_rootfs_installs_runtime_helpers(self):
-        self.write('bin/test-arm-gcc', '#!/bin/sh\necho "gcc (fixture) 8.2"\n', executable=True)
+        self.write('bin/test-arm-gcc', '#!/bin/sh\ncase "$1" in --version|-v) echo "gcc (fixture) 8.2" ;; *) exec cc "$@" ;; esac\n', executable=True)
         self.write('bin/test-arm-as', '#!/bin/sh\necho "as (fixture) 2.32"\n', executable=True)
         config = self.write('buildroot.config', 'BR2_TOOLCHAIN_EXTERNAL_PREFIX=test-arm\nBR2_TARGET_GENERIC_ROOT_PASSWD=fixture\n')
         for board in BOARDS:
@@ -314,6 +319,9 @@ class PostBuildTest(SandboxTest):
                 diagnostic = target / 'usr/sbin/antsdr-diagnostics'
                 self.assertEqual(library.read_bytes(), (FIRMWARE / 'buildroot/board/antsdr/persistence.sh').read_bytes())
                 self.assertTrue(os.access(diagnostic, os.X_OK))
+                self.assertTrue(os.access(target / 'usr/sbin/antsdr-health', os.X_OK))
+                for helper in ('S19storage','S35identity','S95health','S96bootconfirm'):
+                    self.assertTrue(os.access(target / 'etc/init.d' / helper, os.X_OK))
                 info = json.loads((target / 'etc/antsdr-release.json').read_text())
                 self.assertEqual(info['board'], board)
                 self.assertEqual(info['linux'], '5.2.28')

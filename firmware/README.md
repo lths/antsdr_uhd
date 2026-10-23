@@ -209,17 +209,20 @@ environment without duplicating stanzas on restart. Other interfaces and
 Ethernet IPv6 stanzas are preserved. Device start/stop tracks the control
 daemon, network helper, and discovery ping with PID files under `/run`.
 
-`device_passwd` and `device_persistent_keys` require a read/write JFFS2 mount
-at `/mnt/jffs2`. They serialize saves, stage private credential snapshots under
+`device_passwd` and `device_persistent_keys` require mounted private storage.
+On E200, startup creates a 64 MiB ext4 settings image on the existing SD FAT
+partition and mounts it at `/mnt/antsdr-state`. A working legacy JFFS2 store
+at `/mnt/jffs2` retains priority. They serialize saves and stage snapshots under
 `.antsdr/`, and publish them through atomic `.current` pointer files. Boot
 restore validates checksums and also supports the older `etc/` and `root/.ssh/`
 layout. Corrupt saved settings are reported as errors. If persistent storage
 is unavailable, boot keeps the credentials already in the root filesystem;
 save commands fail without writing into the unmounted directory.
 
-Flash access and persistence still need on-board validation: the current E200
-Linux device tree does not declare QSPI flash partitions. These commands do
-not format storage or change partition definitions.
+The E200 Linux device tree does not declare QSPI flash partitions. Private SD
+storage supplies persistence without changing flash or the SD partition table.
+See [the operations guide](../tools/README.md) for the dashboard, receive
+profiles, triggered recording, calibration, health API and recoverable updates.
 
 ## FPGA development workflow
 

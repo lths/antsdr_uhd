@@ -14,6 +14,7 @@
 #include "uhdlib/usrp/cores/spi_core_3000.hpp"
 #include <memory>
 #include <mutex>
+#include <functional>
 
 class ant_local_spi_core : uhd::noncopyable, public uhd::spi_iface
 {
@@ -32,6 +33,7 @@ public:
 
     void change_perif(perif_t perif);
     void restore_perif();
+    void with_peripheral(perif_t perif, const std::function<void()>& transaction);
 
     static sptr make(uhd::wb_iface::sptr iface, perif_t default_perif = CODEC);
 
@@ -39,7 +41,7 @@ private:
     spi_core_3000::sptr _spi_core;
     perif_t _current_perif;
     perif_t _last_perif;
-    std::mutex _mutex;
+    std::recursive_mutex _mutex;
 };
 
 class ant_ref_pll_ctrl : public uhd::usrp::adf4001_ctrl

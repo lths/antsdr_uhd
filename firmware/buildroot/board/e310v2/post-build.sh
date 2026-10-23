@@ -13,7 +13,7 @@ sed -i '/hostname/a\
 
 sed -i -e '/::sysinit:\/bin\/hostname -F \/etc\/hostname/d' ${TARGET_DIR}/etc/inittab
 
-grep -q mtd2 ${TARGET_DIR}/etc/fstab || echo "mtd2 /mnt/jffs2 jffs2 rw,noatime 0 0" >> ${TARGET_DIR}/etc/fstab
+sed -i '\|^mtd2 /mnt/jffs2 |d' "${TARGET_DIR}/etc/fstab"
 
 BOARD_DIR="$(dirname $0)"
 BOARD_NAME="$(basename ${BOARD_DIR})"
@@ -81,3 +81,12 @@ ln -sf device_reboot ${TARGET_DIR}/usr/sbin/e200_reboot
 # Identify the source actually packaged, rather than historical release strings.
 python3 "${BOARD_DIR}/../../../scripts/build_info.py" --board "${BOARD_NAME}" \
 	--target-dir "${TARGET_DIR}" --compiler "${BR2_TOOLCHAIN_EXTERNAL_PREFIX}-gcc"
+
+for helper in S19storage S35identity S95health S96bootconfirm; do
+	${INSTALL} -D -m 0755 "${BOARD_DIR}/../antsdr/$helper" "${TARGET_DIR}/etc/init.d/$helper"
+done
+${INSTALL} -D -m 0755 "${BOARD_DIR}/../antsdr/antsdr-config" "${TARGET_DIR}/usr/sbin/antsdr-config"
+install -d -m 0700 "${TARGET_DIR}/etc/antsdr"
+
+${BR2_TOOLCHAIN_EXTERNAL_PREFIX}-gcc -D_DEFAULT_SOURCE -std=c11 -O2 -Wall -Wextra -Werror \
+    "${BOARD_DIR}/../antsdr/health.c" -o "${TARGET_DIR}/usr/sbin/antsdr-health"

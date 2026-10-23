@@ -54,3 +54,5 @@ xvlog.pb
 
 # Local ANTSDR UHD out-of-tree build
 /host/build-antsdr/
+/.antsdr/
+__pycache__/

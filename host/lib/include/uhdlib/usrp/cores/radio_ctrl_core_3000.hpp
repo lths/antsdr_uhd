@@ -36,7 +36,7 @@ public:
     virtual void hold_task(uhd::msg_task::sptr task) = 0;
 
     //! Push a response externall (resp_xport is NULL)
-    virtual void push_response(const uint32_t* buff) = 0;
+    virtual void push_response(const uint32_t* buff, size_t bytes) = 0;
 
     //! Set the command time that will activate
     void set_time(const uhd::time_spec_t& time) override = 0;

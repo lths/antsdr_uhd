@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+case "${1:-start}" in start) ;; stop) exit 0 ;; *) exit 2 ;; esac
+. /usr/lib/antsdr/persistence.sh
+valid_mac() {
+    echo "$1" | grep -Eq '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$' || return 1
+    case "$1" in ?[02468aAcCeE]:*) ;; *) return 1 ;; esac
+    [ "$1" != 00:00:00:00:00:00 ]
+}
+mac=
+if persist_mounted && [ -f "$PERSIST_ROOT/mac-address" ]; then
+    mac=$(cat "$PERSIST_ROOT/mac-address")
+    valid_mac "$mac" || { echo 'Invalid persisted MAC address' >&2; exit 1; }
+else
+    # A card-unique identity survives firmware replacement without EEPROM writes.
+    cid=$(cat /sys/block/mmcblk0/device/cid)
+    echo "$cid" | grep -Eq '^[0-9a-fA-F]{32}$' || exit 1
+    digest=$(printf '%s' "$cid" | sha256sum)
+    mac=$(printf '%s' "$digest" | awk '{s=substr($1,1,10); printf "02:%s:%s:%s:%s:%s",substr(s,1,2),substr(s,3,2),substr(s,5,2),substr(s,7,2),substr(s,9,2)}')
+    if persist_mounted; then
+        umask 077
+        printf '%s\n' "$mac" > "$PERSIST_ROOT/mac-address.new"
+        sync
+        mv "$PERSIST_ROOT/mac-address.new" "$PERSIST_ROOT/mac-address"
+        sync
+    fi
+fi
+current=$(cat /sys/class/net/eth0/address)
+if [ "$current" != "$mac" ]; then
+    ip link set dev eth0 down
+    ip link set dev eth0 address "$mac"
+fi
+echo "Ethernet identity: $mac"

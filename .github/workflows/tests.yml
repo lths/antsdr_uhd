@@ -1,0 +1,23 @@
+name: Firmware and host regression tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  firmware:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Firmware and boot-state tests
+        run: python3 -m unittest discover -s firmware/tests -v
+  host:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t antsdr-host:22.04 host/docker
+      - name: Build driver, Python API and focused C++ tests
+        run: docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e JOBS=4 -v "$PWD:/work" antsdr-host:22.04 bash host/docker/build.sh
+      - name: Receive tools and dashboard tests
+        run: docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/work" antsdr-host:22.04 python3 -m unittest discover -s tools/tests -v

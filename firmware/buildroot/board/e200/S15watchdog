@@ -1,21 +1,24 @@
 #!/bin/sh
-#
-# Start watchdog
-#
-
-case "$1" in
+set -eu
+pid=/run/watchdog.pid
+running() { start-stop-daemon --stop --test --quiet --pidfile "$pid" --exec /sbin/watchdog; }
+case "${1:-}" in
  start)
-	echo -n "Starting watchdog: "
-	watchdog -t 5 -T 10 /dev/watchdog
-	[ $? = 0 ] && echo "OK" || echo "FAIL"
-	;;
-  stop)
-	;;
-  restart|reload)
-	;;
-  *)
-	echo "Usage: $0 {start|stop|restart}"
-	exit 1
+    start-stop-daemon --start --quiet --oknodo --background --make-pidfile \
+        --pidfile "$pid" --exec /sbin/watchdog -- -F -t 5 -T 10 /dev/watchdog
+    sleep 1
+    running
+    ;;
+ stop)
+    start-stop-daemon --stop --quiet --oknodo --pidfile "$pid" --exec /sbin/watchdog
+    count=0
+    while running; do
+        count=$((count+1)); [ "$count" -lt 5 ] || exit 1
+        sleep 1
+    done
+    rm -f "$pid"
+    ;;
+ restart|reload) "$0" stop; "$0" start ;;
+ status) running ;;
+ *) echo "Usage: $0 {start|stop|restart|status}" >&2; exit 2 ;;
 esac
-
-exit $?

@@ -1,16 +1,19 @@
 # Shared by credential save/restore commands. Snapshot directories are private;
 # an atomic pointer-file replacement publishes a complete, checksummed generation.
 PERSIST_ROOT=/mnt/jffs2
+if awk '$2 == "/mnt/antsdr-state" && $3 == "ext4" && $4 ~ /(^|,)rw(,|$)/ {found=1} END {exit !found}' /proc/mounts; then
+	PERSIST_ROOT=/mnt/antsdr-state
+fi
 PERSIST_STORE=$PERSIST_ROOT/.antsdr
 
 persist_mounted() {
-	awk '$2 == "/mnt/jffs2" && $3 == "jffs2" && $4 ~ /(^|,)rw(,|$)/ { found=1 }
+	awk -v path="$PERSIST_ROOT" '$2 == path && ($3 == "jffs2" || $3 == "ext4") && $4 ~ /(^|,)rw(,|$)/ { found=1 }
 		END { exit !found }' /proc/mounts
 }
 
 persist_require() {
 	persist_mounted && return 0
-	echo 'Persistent JFFS2 storage is not mounted read/write at /mnt/jffs2' >&2
+	echo "Persistent storage is not mounted read/write at $PERSIST_ROOT" >&2
 	return 1
 }
 

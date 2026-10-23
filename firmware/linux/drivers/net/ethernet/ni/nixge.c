@@ -1511,6 +1511,12 @@ static void *nixge_get_nvmem_address(struct device *dev)
 
 	mac = nvmem_cell_read(cell, &cell_size);
 	nvmem_cell_put(cell);
+	if (IS_ERR(mac))
+		return NULL;
+	if (cell_size != ETH_ALEN || !is_valid_ether_addr(mac)) {
+		kfree(mac);
+		return NULL;
+	}
 
 	return mac;
 }
@@ -1755,10 +1761,10 @@ static int nixge_probe(struct platform_device *pdev)
 	mac_addr = nixge_get_nvmem_address(&pdev->dev);
 	if (mac_addr && is_valid_ether_addr(mac_addr)) {
 		ether_addr_copy(ndev->dev_addr, mac_addr);
-		kfree(mac_addr);
 	} else {
 		eth_hw_addr_random(ndev);
 	}
+	kfree(mac_addr);
 
 	priv = netdev_priv(ndev);
 	priv->ndev = ndev;

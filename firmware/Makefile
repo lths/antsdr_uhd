@@ -79,6 +79,10 @@ build/u-boot.elf: u-boot-xlnx/u-boot | build
 ## uboot uenv.txt
 build/uboot-env.txt: build/u-boot.elf | build
 	CROSS_COMPILE=$(CROSS_COMPILE) scripts/get_default_envs.sh > $@
+	python3 scripts/slot_env.py $@
+
+build/boot.scr: scripts/boot.cmd u-boot-xlnx/tools/mkimage | build
+	u-boot-xlnx/tools/mkimage -A arm -T script -C none -n 'ANTSDR recoverable SD boot' -d $< $@
 
 ## linux uImage
 linux/arch/arm/boot/uImage: 
@@ -175,9 +179,10 @@ build/BOOT.bin : build/boot.bif
 
 SDIMGDIR=$(CURDIR)/build_sdimg
 .PHONY: sdimg
-sdimg: build/BOOT.bin build/system_top.bit build/uImage build/uboot-env.txt build/device_tree.dtb build/rootfs.cpio.gz
+sdimg: build/BOOT.bin build/system_top.bit build/uImage build/uboot-env.txt build/device_tree.dtb build/rootfs.cpio.gz build/boot.scr
 	mkdir -p $(SDIMGDIR)
 	cp build/BOOT.bin $(SDIMGDIR)/
+	cp build/boot.scr $(SDIMGDIR)/
 	cp build/system_top.bit $(SDIMGDIR)/antsdr.bit
 	cp build/uImage $(SDIMGDIR)/
 	cp build/uboot-env.txt $(SDIMGDIR)/uEnv.txt
@@ -186,7 +191,7 @@ sdimg: build/BOOT.bin build/system_top.bit build/uImage build/uboot-env.txt buil
 	mkimage -A arm -T ramdisk -C gzip -d $(SDIMGDIR)/ramdisk.image.gz $(SDIMGDIR)/uramdisk.image.gz
 	rm $(SDIMGDIR)/ramdisk.image.gz
 	cp buildroot/output/target/etc/antsdr-release.json $(SDIMGDIR)/BUILD_INFO.json
-	cd $(SDIMGDIR) && sha256sum BOOT.bin antsdr.bit uImage uEnv.txt devicetree.dtb uramdisk.image.gz BUILD_INFO.json > SHA256SUMS
+	cd $(SDIMGDIR) && sha256sum BOOT.bin boot.scr antsdr.bit uImage uEnv.txt devicetree.dtb uramdisk.image.gz BUILD_INFO.json > SHA256SUMS
 	@echo "ANTSDR-$(shell echo $(TARGET) | tr a-z A-Z) SD image ready: $(SDIMGDIR)"
 
 clean-build:

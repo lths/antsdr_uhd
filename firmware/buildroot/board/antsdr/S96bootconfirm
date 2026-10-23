@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+boot=/mnt/antsdr-boot
+case "${1:-start}" in start) ;; stop) exit 0 ;; *) exit 2 ;; esac
+slot=$(sed -n 's/.*antsdr\.slot=\([^ ]*\).*/\1/p' /proc/cmdline)
+case "$slot" in a|b) ;; *) exit 0 ;; esac
+[ -f "$boot/antsdr-trial" ] || exit 0
+trial=$(cat "$boot/antsdr-trial")
+[ "$trial" = "$slot" ] || exit 0
+confirmed=no
+for attempt in $(seq 30); do
+    if /usr/sbin/antsdr-health --json >/run/antsdr-boot-health.json; then
+        confirmed=yes
+        break
+    fi
+    sleep 1
+done
+if [ "$confirmed" != yes ]; then
+    logger -t antsdr-boot 'Trial service health failed; rebooting to previous slot'
+    sync
+    reboot
+    exit 1
+fi
+# Check the slot itself before publishing it as the next boot's known good image.
+if ! (cd "$boot/antsdr-slots/$slot" && sha256sum -c SHA256SUMS >/dev/null) ||
+    ! cmp -s /etc/antsdr-release.json "$boot/antsdr-slots/$slot/BUILD_INFO.json"; then
+    logger -t antsdr-boot 'Trial integrity check failed; rebooting to previous slot'
+    sync
+    reboot
+    exit 1
+fi
+if [ -f "$boot/antsdr-active" ]; then cp "$boot/antsdr-active" "$boot/antsdr-previous.new"; else printf root > "$boot/antsdr-previous.new"; fi
+sync
+mv "$boot/antsdr-previous.new" "$boot/antsdr-previous"
+printf '%s' "$slot" > "$boot/antsdr-active.new"
+sync
+mv "$boot/antsdr-active.new" "$boot/antsdr-active"
+sync
+rm -f "$boot/antsdr-trial" "$boot/antsdr-attempted"
+sync
+logger -t antsdr-boot "Confirmed firmware slot $slot"

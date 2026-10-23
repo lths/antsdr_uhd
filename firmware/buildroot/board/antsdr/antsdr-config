@@ -1,0 +1,35 @@
+#!/bin/sh
+# Snapshot only regular configuration files; never execute saved configuration.
+set -eu
+. /usr/lib/antsdr/persistence.sh
+persist_require
+persist_lock
+case "${1:-}" in
+ save)
+    [ -d /etc/antsdr ] || exit 1
+    persist_begin settings
+    for file in /etc/antsdr/*; do
+        [ -e "$file" ] || continue
+        [ -f "$file" ] && [ ! -L "$file" ] || exit 1
+        name=${file##*/}
+        case "$name" in *[!A-Za-z0-9_.-]*) exit 1 ;; esac
+        install -m 0600 "$file" "$SNAPSHOT/$name"
+    done
+    (cd "$SNAPSHOT"; find . -type f ! -name settings.sha256 -exec sha256sum '{}' \; > settings.sha256)
+    persist_publish
+    ;;
+ restore)
+    persist_directory settings "$PERSIST_ROOT/settings"
+    [ -f "$dir/settings.sha256" ] || { [ "$HAS_SNAPSHOT" -eq 0 ]; exit $?; }
+    # Reject paths outside this generation before checksum reads or installation.
+    awk 'NF != 2 || $2 !~ /^\.\/[A-Za-z0-9_.-]+$/ {bad=1} END {exit bad}' "$dir/settings.sha256"
+    (cd "$dir" && { [ ! -s settings.sha256 ] || sha256sum -c settings.sha256 >/dev/null; })
+    install -d -m 0700 /etc/antsdr
+    while read -r digest relative; do
+        file=$dir/$relative
+        [ -f "$file" ] && [ ! -L "$file" ] || exit 1
+        install -m 0600 "$file" /etc/antsdr/
+    done < "$dir/settings.sha256"
+    ;;
+ *) echo "Usage: $0 {save|restore}" >&2; exit 2 ;;
+esac

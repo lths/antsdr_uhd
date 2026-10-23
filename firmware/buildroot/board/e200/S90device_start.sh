@@ -63,9 +63,9 @@ if [ "$1" != status ]; then
 	flock -n 9 || { echo 'Device service is busy' >&2; exit 1; }
 fi
 case "$1" in
-	start) start; result=$? ;;
-	stop) stop; result=$? ;;
-	restart) stop && start; result=$? ;;
+	start) rm -f "$RUNDIR/antsdr-maintenance"; start; result=$? ;;
+	stop) touch "$RUNDIR/antsdr-maintenance"; stop; result=$? ;;
+	restart) rm -f "$RUNDIR/antsdr-maintenance"; stop && start; result=$? ;;
 	status)
 		running "/sbin/$DEVICE" "$RUNDIR/$DEVICE.pid" && running /sbin/net_set "$RUNDIR/net_set.pid"
 		result=$?

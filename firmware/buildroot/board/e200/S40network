@@ -9,6 +9,25 @@ create_system_files() {
 	ETH_IPADDR=$(fw_printenv -n ipaddr_eth 2>/dev/null || echo 192.168.1.10)
 	ETH_NETMASK=$(fw_printenv -n netmask_eth 2>/dev/null || echo 255.255.255.0)
 
+	if [ -f /etc/antsdr/network.conf ]; then
+		while IFS='=' read -r key value; do
+			case "$key" in
+				address|netmask)
+					if [ -n "$value" ]; then
+						printf '%s\n' "$value" | awk -F. 'NF!=4 {exit 1} {for(i=1;i<=4;i++) if($i !~ /^[0-9]+$/ || $i>255) exit 1}' || return 1
+					fi
+					case "$key" in address) ETH_IPADDR=$value ;; netmask) [ -n "$value" ] || return 1; ETH_NETMASK=$value ;; esac
+					;;
+				hostname)
+					printf '%s\n' "$value" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$' || return 1
+					printf '%s\n' "$value" > /etc/hostname || return 1
+					;;
+				''|'#'*) ;;
+				*) echo "Unknown network setting: $key" >&2; return 1 ;;
+			esac
+		done < /etc/antsdr/network.conf
+	fi
+
 	# Replace the managed IPv4 stanza, including duplicates from older firmware.
 	# Keep loopback, IPv6 and configuration for other interfaces.
 	tmp=$(mktemp "$IFAC.XXXXXX") || return 1

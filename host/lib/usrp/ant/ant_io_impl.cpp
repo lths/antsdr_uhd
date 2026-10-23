@@ -8,6 +8,7 @@
 #include "../../transport/super_recv_packet_handler.hpp"
 #include "../../transport/super_send_packet_handler.hpp"
 #include "ant_impl.hpp"
+#include <chrono>
 #include "ant_regs.hpp"
 #include "uhd/utils/math.hpp"
 #include "uhdlib/usrp/common/async_packet_handler.hpp"
@@ -340,7 +341,7 @@ boost::optional<uhd::msg_task::msg_type_t> ant_impl::handle_async_task(
             if (sid == ANT_LOCAL_RESP_SID)
                 ctrl = data->local_ctrl.lock();
             if (ctrl) {
-                ctrl->push_response(buff->cast<const uint32_t*>());
+                ctrl->push_response(buff->cast<const uint32_t*>(), buff->size());
             } else {
                 return std::make_pair(sid,
                     uhd::msg_task::buff_to_vector(buff->cast<uint8_t*>(), buff->size()));
@@ -350,7 +351,8 @@ boost::optional<uhd::msg_task::msg_type_t> ant_impl::handle_async_task(
 
         // if the packet is a uart message
         case ANT_RX_GPS_UART_SID: {
-            data->gpsdo_uart->handle_uart_packet(buff);
+            if (data->gpsdo_uart)
+                data->gpsdo_uart->handle_uart_packet(buff);
             break;
         }
 
@@ -760,18 +762,24 @@ uhd::transport::managed_send_buffer::sptr ant_impl::_get_tx_buff_with_flowctrl(u
                                                                                uhd::transport::zero_copy_if::sptr xport,
                                                                                size_t fc_pkt_window,
                                                                                const double timeout) {
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::duration<double>(std::max(0.0, timeout));
+    const auto remaining = [&]() {
+        return std::max(0.0, std::chrono::duration<double>(
+            deadline - std::chrono::steady_clock::now()).count());
+    };
     while (true) {
         const size_t delta = (fc_cache->last_seq_out & 0xFFF)
                              - (fc_cache->last_seq_ack & 0xFFF);
         if ((delta & 0xFFF) <= fc_pkt_window)
             break;
         const bool ok =
-                fc_cache->seq_queue.pop_with_timed_wait(fc_cache->last_seq_ack, timeout);
-        if (not ok)
+                fc_cache->seq_queue.pop_with_timed_wait(fc_cache->last_seq_ack, remaining());
+        if (not ok || std::chrono::steady_clock::now() >= deadline)
             return uhd::transport::managed_send_buffer::sptr(); // timeout waiting for flow control
     }
 
-    managed_send_buffer::sptr buff = xport->get_send_buff(timeout);
+    managed_send_buffer::sptr buff = xport->get_send_buff(remaining());
     if (buff)
         fc_cache->last_seq_out++; // update seq, this will actually be a send
     return buff;

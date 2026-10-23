@@ -34,8 +34,11 @@ case "$1" in
 			echo 'Persistent storage unavailable; keeping current credentials'
 			exit 0
 		fi
-		persist_lock || exit 1
 		result=0
+		if [ -x /usr/sbin/antsdr-config ]; then
+			/usr/sbin/antsdr-config restore || result=1
+		fi
+		persist_lock || exit 1
 		for kind in passwords dropbear authorized_keys; do
 			if ! "restore_$kind"; then
 				echo "Failed to restore $kind" >&2

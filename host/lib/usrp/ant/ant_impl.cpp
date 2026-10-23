@@ -310,7 +310,7 @@ static device_addrs_t ant_find(const device_addr_t& hint)
 
     while (true) {
         size_t len = udp_transport->recv(boost::asio::buffer(microphase_ant_ctrl_data_in_mem));
-        if (len > offsetof(microphase_ant_ctrl_data_t, serial)
+        if (len == sizeof(microphase_ant_ctrl_data_t)
             and ntohl(ctrl_data_in->id) == MICROPHASE_CTRL_ID_WAZZUP_DUDE
             and ntohl(ctrl_data_in->check) == MICROPHASE_CHECK
             and ntohl(ctrl_data_in->serial) == MICROPHASE_SERIAL_DUDE
