@@ -1,0 +1,2 @@
+# Preserve the vendor IP's CRLF source without treating CR as trailing spaces.
+firmware/fpga/antsdr_e200/ip/deep_fifo/src/deep_fifo_core.v whitespace=cr-at-eol

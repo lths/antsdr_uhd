@@ -76,6 +76,11 @@ the radio. Partial packets, backpressure, and a new owner do not turn an old
 queued or timed burst into a new session's transmission. The 64 MiB queue at
 `0x18000000` is reserved from Linux allocation.
 
+The E200 DDR FIFO also waits for a complete AXI burst of input words and for
+the write response before publishing written memory to readers. This prevents
+the vendor 128-word threshold from starting an incomplete 256-word burst when
+the packet producer pauses, and prevents reads of uncommitted writes.
+
 Leases coordinate cooperative clients on a trusted LAN. Source IPv4 filtering
 and UDP tokens are **not cryptographic authentication or protection against a
 hostile LAN/spoofed radio packets**. There is no remote force-takeover command.
@@ -104,3 +109,8 @@ source filtering on every offload port, and continued CPU access without a
 lease. The focused C++ `ant_control_test` includes lease lifetime, competing
 owner, and lost-renewal tests. Physical external PPS triggering still needs a
 connected pulse source.
+
+`firmware/fpga/tests/run_deep_fifo.sh` tests the actual DDR core with packet
+pauses, input starvation, AXI backpressure, delayed write commitment, memory
+wraparound, and draining a final partial burst. The original core fails this
+test by popping an empty input FIFO.

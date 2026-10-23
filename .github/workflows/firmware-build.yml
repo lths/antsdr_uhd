@@ -23,6 +23,8 @@ jobs:
         run: bash firmware/fpga/tests/run_rx_trigger.sh
       - name: Device ownership and DDR queue regression
         run: bash firmware/fpga/tests/run_lease.sh
+      - name: DDR FIFO starvation and AXI backpressure regression
+        run: bash firmware/fpga/tests/run_deep_fifo.sh
       - name: Build and verify image
         env:
           BOARD: ${{ inputs.board }}

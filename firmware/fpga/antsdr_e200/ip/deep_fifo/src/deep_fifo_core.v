@@ -222,6 +222,9 @@
 	//====================================================
 	//parameter define
 	//====================================================
+	// Never begin an AXI burst before all of its input words exist.
+	localparam pre_burst_threshold = fifo_pre_threshold > C_M_AXI_BURST_LEN ?
+		fifo_pre_threshold : C_M_AXI_BURST_LEN;
 	localparam addr_width = log2_ram_size_addr;		// maximum fifo addr width
 	localparam ptr_width = log2_ram_size_addr + 1;	// maximum fifo ptr width
 	localparam burst_in_bytes = C_M_AXI_BURST_LEN * C_M_AXI_DATA_WIDTH/8; //axi burst in bytes
@@ -346,11 +349,11 @@
 			bypass_mode <= 1'b1;
 		end
 		// pre fifo is above threshold and the deep_fifo is now totally empty
-		else if ((fifo_pre_rd_count < fifo_pre_threshold) && (deep_fifo_empty == 1'b1) && (axi_rlast_neg_pls == 1'b1)) begin
+		else if ((fifo_pre_rd_count < pre_burst_threshold) && (deep_fifo_empty == 1'b1) && (axi_rlast_neg_pls == 1'b1) && !axi_wr_work_on && !axi_rd_work_on) begin
 			bypass_mode <= 1'b1;
 		end
 		// pre fifo is under the threshold
-		else if (fifo_pre_rd_count >= fifo_pre_threshold) begin
+		else if (fifo_pre_rd_count >= pre_burst_threshold) begin
 			bypass_mode <=  1'b0;
 		end
 	end
@@ -409,7 +412,7 @@
 		end
 		else if (bypass_mode == 1'b0) begin
 			// in non-bypss mode, the deep fifo is not full, the axi bus is not working and  the pre fifo has enough data for bust
-			if ((fifo_pre_rd_count >= fifo_pre_threshold) && (deep_fifo_full == 1'b0) && (axi_wr_work_on == 1'b0)) begin
+			if ((fifo_pre_rd_count >= pre_burst_threshold) && (deep_fifo_full == 1'b0) && (axi_wr_work_on == 1'b0)) begin
 				wr_burst_start <= 1'b1;
 			end
 			else begin
@@ -428,7 +431,7 @@
 		end
 		else if (bypass_mode == 1'b0) begin
 			// when one axi burst is finished
-			if ((axi_wr_work_on == 1'b1) && (end_cnt_wr_burst == 1'b1)) begin
+			if ((axi_wr_work_on == 1'b1) && M_AXI_BVALID && M_AXI_BREADY) begin
 				axi_wr_work_on <= 1'b0;
 			end
 			else if(wr_burst_start == 1'b1)begin
@@ -577,7 +580,7 @@
 		if (M_AXI_ARESETN==1'b0) begin
 			wr_ram_ptr <= 'd0;
 		end
-		else if (end_cnt_wr_burst == 1'b1) begin
+		else if (M_AXI_BVALID && M_AXI_BREADY) begin
 			wr_ram_ptr <= wr_ram_ptr + burst_in_bytes;
 		end
 	end
