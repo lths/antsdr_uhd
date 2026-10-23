@@ -70,6 +70,8 @@ Each `.cf32.json` sidecar records requested and actual settings, device serial,
 device sample timestamps, trigger details, calibration, errors and discontinuities.
 Interrupted or untriggered captures have `complete: false`. Destination files are
 never overwritten. For two channels, reshape loaded data to `(-1, 2)`.
+Two-channel sessions synchronize both device timekeepers after final MIMO clock
+and streamer setup; the sidecar records that the device time origin was reset.
 
 The dashboard can edit profiles, select a profile, preview a spectrum/waterfall,
 and record immediate, delayed or level-triggered captures. Saved files remain in

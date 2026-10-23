@@ -8,15 +8,21 @@ valid_mac() {
     [ "$1" != 00:00:00:00:00:00 ]
 }
 mac=
+current=$(cat /sys/class/net/eth0/address)
 if persist_mounted && [ -f "$PERSIST_ROOT/mac-address" ]; then
     mac=$(cat "$PERSIST_ROOT/mac-address")
     valid_mac "$mac" || { echo 'Invalid persisted MAC address' >&2; exit 1; }
 else
-    # A card-unique identity survives firmware replacement without EEPROM writes.
-    cid=$(cat /sys/block/mmcblk0/device/cid)
-    echo "$cid" | grep -Eq '^[0-9a-fA-F]{32}$' || exit 1
-    digest=$(printf '%s' "$cid" | sha256sum)
-    mac=$(printf '%s' "$digest" | awk '{s=substr($1,1,10); printf "02:%s:%s:%s:%s:%s",substr(s,1,2),substr(s,3,2),substr(s,5,2),substr(s,7,2),substr(s,9,2)}')
+    assignment=$(cat /sys/class/net/eth0/addr_assign_type 2>/dev/null || printf 1)
+    if [ "$assignment" = 0 ] && valid_mac "$current"; then
+        mac=$current
+    else
+        # A card-unique fallback survives updates without EEPROM writes.
+        cid=$(cat /sys/block/mmcblk0/device/cid)
+        echo "$cid" | grep -Eq '^[0-9a-fA-F]{32}$' || exit 1
+        digest=$(printf '%s' "$cid" | sha256sum)
+        mac=$(printf '%s' "$digest" | awk '{s=substr($1,1,10); printf "02:%s:%s:%s:%s:%s",substr(s,1,2),substr(s,3,2),substr(s,5,2),substr(s,7,2),substr(s,9,2)}')
+    fi
     if persist_mounted; then
         umask 077
         printf '%s\n' "$mac" > "$PERSIST_ROOT/mac-address.new"
@@ -25,7 +31,6 @@ else
         sync
     fi
 fi
-current=$(cat /sys/class/net/eth0/address)
 if [ "$current" != "$mac" ]; then
     ip link set dev eth0 down
     ip link set dev eth0 address "$mac"

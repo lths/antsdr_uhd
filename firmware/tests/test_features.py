@@ -55,10 +55,11 @@ class IdentityTest(RuntimeTest):
         self.redirect(FIRMWARE/'buildroot/board/antsdr/persistence.sh','persistence.sh')
         self.write('cid','6f0303534441424310aa002494018a00\n')
         self.write('mac','12:34:56:78:9a:bc\n')
+        self.write('assignment','1\n')
         self.write('bin/sync','#!/bin/sh\nexit 0\n',executable=True)
         self.write('bin/ip',f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{self.root}/ip-calls"\n',executable=True)
         source=FIRMWARE/'buildroot/board/antsdr/S35identity'
-        text=source.read_text().replace('/sys/block/mmcblk0/device/cid',str(self.root/'cid')).replace('/sys/class/net/eth0/address',str(self.root/'mac'))
+        text=source.read_text().replace('/sys/block/mmcblk0/device/cid',str(self.root/'cid')).replace('/sys/class/net/eth0/address',str(self.root/'mac')).replace('/sys/class/net/eth0/addr_assign_type',str(self.root/'assignment'))
         self.script=self.redirect(self.write('identity-source',text),'identity')
 
     def test_identity_is_stable_and_locally_administered(self):
@@ -73,6 +74,13 @@ class IdentityTest(RuntimeTest):
     def test_invalid_persisted_identity_is_rejected(self):
         self.write('sd-state/mac-address','ff:ff:ff:ff:ff:ff\n')
         self.run_command(['sh',str(self.script),'start'],success=False)
+        self.assertFalse((self.root/'ip-calls').exists())
+
+    def test_factory_address_is_preserved(self):
+        self.write('assignment','0\n')
+        self.write('mac','00:0a:35:12:34:56\n')
+        self.run_command(['sh',str(self.script),'start'])
+        self.assertEqual((self.root/'sd-state/mac-address').read_text(),'00:0a:35:12:34:56\n')
         self.assertFalse((self.root/'ip-calls').exists())
 
 

@@ -8,12 +8,13 @@ import struct
 import tempfile
 import threading
 import unittest
+from unittest.mock import MagicMock, patch
 import zlib
 
 from antsdr import ops
 from antsdr.__main__ import DEFAULT
 from antsdr.dashboard import Application, make_server
-from antsdr.radio import Trigger, spectrum
+from antsdr.radio import Receiver, Trigger, spectrum
 from antsdr.store import Store, profile, calibration
 
 
@@ -48,6 +49,23 @@ class RecordsTest(unittest.TestCase):
 
 
 class SignalTest(unittest.TestCase):
+    def test_dual_channel_time_sync_follows_final_stream_activation(self):
+        fake=MagicMock()
+        device=fake.usrp.MultiUSRP.return_value
+        device.get_usrp_rx_info.return_value={'mboard_serial':'0123456789abcdef'}
+        device.get_rx_num_channels.return_value=2
+        device.get_rx_rate.return_value=1e6
+        for getter in ('get_rx_freq_range','get_rx_gain_range','get_rx_bandwidth_range'):
+            getattr(device,getter).return_value.start.return_value=0
+            getattr(device,getter).return_value.stop.return_value=10e9
+        order=[]
+        device.get_rx_stream.side_effect=lambda args:order.append('stream') or MagicMock()
+        device.set_time_now.side_effect=lambda time:order.append('synchronize')
+        with patch.dict('sys.modules',{'uhd':fake}):
+            receiver=Receiver('192.168.1.10',dict(DEFAULT,channels=[0,1]))
+            receiver.close()
+        self.assertEqual(order,['stream','synchronize'])
+
     def test_fft_frequency_and_level(self):
         import numpy as np
         n=1024;rate=1e6
@@ -87,6 +105,21 @@ def release(root):
 
 
 class ReleaseTest(unittest.TestCase):
+    def test_legacy_fallback_health_remains_observable(self):
+        class Connection:
+            host='192.168.1.10'
+            def run(self,command,**kwargs):
+                return {'/etc/init.d/S90device_start.sh status':'OK\n',
+                        'cat /etc/antsdr-release.json':'{"board":"e200"}',
+                        'cat /sys/class/net/eth0/address':'02:11:22:33:44:55\n',
+                        'cat /sys/class/net/eth0/carrier':'1\n',
+                        'cat /proc/uptime':'10.5 0\n',
+                        'cat /proc/cmdline':'antsdr.slot=root panic=10\n'}.get(command,'')
+        with patch('antsdr.ops.discover',return_value={'model':'E200'}):
+            status=ops.health(Connection())
+        self.assertTrue(status['healthy']);self.assertTrue(status['legacy_health'])
+        self.assertEqual(status['boot_slot'],'root')
+
     def test_release_integrity_and_path_validation(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);info=release(root)
@@ -124,6 +157,19 @@ class ReleaseTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):ops.deploy(connection,folder)
             self.assertEqual(len(connection.uploads),9)
             self.assertFalse(any('antsdr-trial.new' in command for command in connection.commands))
+
+    def test_rollback_of_pending_trial_retains_confirmed_image(self):
+        class Connection:
+            def __init__(self):self.commands=[]
+            def run(self,command,**kwargs):
+                self.commands.append(command)
+                if '/antsdr-trial ' in command:return 'b'
+                if '/antsdr-active ' in command:return 'a'
+                return ''
+        connection=Connection()
+        result=ops.rollback(connection)
+        self.assertEqual(result,{'selected_slot':'a','cancelled_trial':'b'})
+        self.assertFalse(any('antsdr-active.new' in command for command in connection.commands))
 
 
 class DashboardTest(unittest.TestCase):

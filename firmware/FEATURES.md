@@ -22,13 +22,30 @@ here as each feature is validated. FPGA-resident spectrum processing requires a
 separate resource and timing assessment; the first display processes samples on
 the host. The supplied ARM control daemon remains a vendor binary.
 
-## Validation status
+## Validation
 
-Implementation is complete; the combined on-device release is pending validation.
-The host driver, Python package and focused control/transport C++ tests build
-successfully. Firmware tests pass with both host tools and BusyBox. The new
-recorder has captured approximately one million samples at 1 MS/s without
-reported receive errors. The ARM health probe has also passed a RAM-only E200
-check. Full slot deployment, persistence, recovery and dashboard tests follow.
+The combined E200 implementation has passed on-device checks for private SD
+settings, restored radio/network configuration, stable MAC and SSH host keys,
+maintenance behavior, daemon crash recovery, trial confirmation and automatic
+fallback from a trial with a missing kernel. The live dashboard has displayed
+real spectrum data and device health. Receive tests passed at 1, 5 and 10 MS/s;
+two-channel 1 MS/s capture passed after synchronizing timekeepers after final
+MIMO setup. Delayed capture retained the requested 50,000 pretrigger samples.
+Calibration application is software-tested; RF calibration still requires a
+measured reference.
+
+Hardware test artifacts and structured reports are written under
+`firmware/build/validation/`. Hardware-free checks cover firmware boot and
+persistence logic, control response validation, SPI exclusion/restoration,
+profiles, calibration, triggers, FFT levels and dashboard access.
+
+## FPGA assessment
+
+The current implemented design uses 39,845/53,200 LUTs (74.90%),
+44,981/106,400 registers (42.28%), 95.5/140 block RAM tiles (68.21%) and
+100/220 DSPs (45.45%). Its existing routed setup slack is +0.182 ns.
+These figures support keeping the first spectrum/waterfall implementation on
+the host. An FPGA-resident FFT would need a concrete resource budget and a fresh
+implementation/timing run; it is not enabled by this release.
 
 See [the operations guide](../tools/README.md) for commands and recovery limits.

@@ -165,7 +165,24 @@ def trust_console(host, serial_path, known_hosts, password=None):
 
 
 def health(connection):
-    current = json.loads(connection.run('/usr/sbin/antsdr-health --json', check=False))
+    native = connection.run('/usr/sbin/antsdr-health --json', check=False)
+    if native:
+        current = json.loads(native)
+    else:
+        # Original fallback images predate the native health utility.
+        services = connection.run('/etc/init.d/S90device_start.sh status', check=False).strip() == 'OK'
+        try:
+            discover(connection.host)
+            discovery = True
+        except (OSError,ValueError):
+            discovery = False
+        current = {'schema_version':1,'legacy_health':True,'healthy':services and discovery,
+                   'radio_running':services,'network_running':services,'discovery':discovery,
+                   'firmware':json.loads(connection.run('cat /etc/antsdr-release.json')),
+                   'mac':connection.run('cat /sys/class/net/eth0/address').strip(),
+                   'link_up':connection.run('cat /sys/class/net/eth0/carrier').strip()=='1',
+                   'uptime_seconds':float(connection.run('cat /proc/uptime').split()[0]),
+                   'restarts':0,'maintenance':False}
     cached = connection.run('cat /run/antsdr-health.json 2>/dev/null', check=False)
     if cached:
         supervision = json.loads(cached)
@@ -174,6 +191,11 @@ def health(connection):
     stats = connection.run('ethtool -S eth0 2>/dev/null', check=False)
     current['hardware_counters'] = {key:int(value) for key,value in re.findall(r'^\s+([A-Za-z0-9_]+): (\d+)\s*$', stats, re.M)}
     current['recent_events'] = connection.run("{ logread 2>/dev/null || cat /var/log/messages 2>/dev/null; } | grep -E 'antsdr-health|antsdr-boot' | tail -20", check=False).splitlines()
+    command_line = connection.run('cat /proc/cmdline')
+    match = re.search(r'(?:^| )antsdr\.slot=(a|b|root)(?: |$)', command_line.strip())
+    current['boot_slot'] = match[1] if match else 'legacy'
+    current['confirmed_slot'] = connection.run('cat '+BOOT+'/antsdr-active 2>/dev/null', check=False).strip() or 'root'
+    current['trial_slot'] = connection.run('cat '+BOOT+'/antsdr-trial 2>/dev/null', check=False).strip() or None
     return current
 
 
@@ -211,6 +233,15 @@ def deploy(connection, directory):
 
 def rollback(connection):
     connection.run('test -f '+BOOT+'/antsdr-boot-protocol')
+    pending = connection.run('cat '+BOOT+'/antsdr-trial 2>/dev/null', check=False).strip()
+    if pending:
+        if pending not in ('a','b'):
+            raise ValueError('Invalid pending trial marker')
+        active = connection.run('cat '+BOOT+'/antsdr-active 2>/dev/null', check=False).strip() or 'root'
+        if active not in ('a','b','root'):
+            raise ValueError('Invalid active slot marker')
+        connection.run('rm -f '+BOOT+'/antsdr-trial '+BOOT+'/antsdr-attempted; sync')
+        return {'selected_slot':active,'cancelled_trial':pending}
     previous = connection.run('cat '+BOOT+'/antsdr-previous 2>/dev/null', check=False).strip()
     if previous not in ('', 'root', 'a', 'b'):
         raise ValueError('Invalid previous-slot marker')

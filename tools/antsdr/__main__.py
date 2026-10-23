@@ -71,7 +71,7 @@ def main(argv=None):
         if not args.serial:
             raise ValueError('Use --serial to verify the host key through the E200 console')
         return ops.trust_console(args.address,args.serial,known_hosts,password)
-    def reboot_and_check(expected=None):
+    def reboot_and_check(expected=None, expected_slot=None):
         # The asynchronous reboot permits SSH to finish sending its reply.
         with connect() as connection:
             connection.run('sync; (sleep 1; reboot) >/dev/null 2>&1 </dev/null &')
@@ -89,12 +89,20 @@ def main(argv=None):
         if args.serial:
             trust()
         with connect() as connection:
-            status=ops.health(connection)
+            confirmation_deadline=time.monotonic()+40
+            while True:
+                status=ops.health(connection)
+                if not expected_slot or (status['confirmed_slot']==expected_slot and status['trial_slot'] is None):
+                    break
+                if status['boot_slot']!=expected_slot or time.monotonic()>=confirmation_deadline:
+                    raise RuntimeError('Requested trial slot was not confirmed')
+                time.sleep(0.25)
             if not status['healthy']:
                 raise RuntimeError('Firmware returned but its service health check failed')
             if expected and status['firmware']['source_revision']!=expected:
                 raise RuntimeError('Trial did not activate; the running firmware differs from the requested release')
-            connection.run('device_persistent_keys')
+            if status['firmware'].get('boot_protocol') == 1:
+                connection.run('device_persistent_keys')
             result['health']=status
         return result
 
@@ -158,7 +166,8 @@ def main(argv=None):
                         store.put(kind,value);saved.append(value['name'])
                 result={'restored':saved}
         if args.command in ('deploy','rollback') and args.reboot:
-            result['verification']=reboot_and_check(result['release']['source_revision'] if args.command=='deploy' else None)
+            result['verification']=reboot_and_check(result['release']['source_revision'] if args.command=='deploy' else None,
+                                                    result['slot'] if args.command=='deploy' else None)
     print(json.dumps(result,indent=2,allow_nan=False))
     return 0
 

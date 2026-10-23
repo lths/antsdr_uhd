@@ -775,7 +775,8 @@ uhd::transport::managed_send_buffer::sptr ant_impl::_get_tx_buff_with_flowctrl(u
             break;
         const bool ok =
                 fc_cache->seq_queue.pop_with_timed_wait(fc_cache->last_seq_ack, remaining());
-        if (not ok || std::chrono::steady_clock::now() >= deadline)
+        const size_t updated_delta = (fc_cache->last_seq_out - fc_cache->last_seq_ack) & 0xFFF;
+        if (not ok || (std::chrono::steady_clock::now() >= deadline && updated_delta > fc_pkt_window))
             return uhd::transport::managed_send_buffer::sptr(); // timeout waiting for flow control
     }
 

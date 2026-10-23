@@ -91,6 +91,10 @@ class Receiver:
         stream_args = uhd.usrp.StreamArgs('fc32', 'sc16')
         stream_args.channels = self.settings['channels']
         self.stream = self.device.get_rx_stream(stream_args)
+        if len(self.settings['channels']) > 1:
+            # Final MIMO activation may change the clock. Synchronize only after
+            # the streamer has enabled both chains, before its timed start.
+            self.device.set_time_now(uhd.types.TimeSpec(0.0))
         self.actual = [{'channel': c, 'frequency_hz': self.device.get_rx_freq(c),
                         'sample_rate': self.device.get_rx_rate(c),
                         'gain_db': self.device.get_rx_gain(c),
@@ -127,6 +131,7 @@ class Receiver:
                   'overflows':0, 'timeouts':0, 'other_errors':0, 'triggered':False,
                   'first_sample_device_time':None, 'complete':False, 'discontinuities':[]}
         report['trigger_kind'] = 'host-delay' if trigger_after_seconds is not None else 'level' if threshold_dbfs is not None else 'immediate'
+        report['device_time_reset_for_alignment'] = len(self.settings['channels']) > 1
         handles = None
         if output:
             output = Path(output)

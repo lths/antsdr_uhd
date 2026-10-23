@@ -47,6 +47,7 @@ void ant_local_spi_core::change_perif(perif_t perif)
 
 void ant_local_spi_core::restore_perif()
 {
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
     change_perif(_last_perif);
 }
 
