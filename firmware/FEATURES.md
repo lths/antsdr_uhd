@@ -48,6 +48,28 @@ remains available for diagnosis; a subsequent reset rejects an unconfirmed trial
 Calibration application is software-tested; RF calibration still requires a
 measured reference.
 
+### Fresh SD and TX/RX validation
+
+On 2026-10-23, an E200 booted the complete `dfe9da66b` release from a fresh FAT32
+SD card. All boot-file hashes matched after host remount and on-device readback.
+Private state creation and write/read checks passed, and a reboot preserved the
+new MAC and SSH key. The first card reader failed with USB resets and write
+errors; filesystem repair and installation through a different reader passed.
+
+A finite 50 ms burst at 902.1 MHz, with minimum hardware TX gain and digitally
+attenuated samples, produced a 12.0 dB received tone rise and 14.6 dB fall with
+no stream errors or clipping. TX and RX antennas were about 12 inches apart.
+This checks basic TX/RX operation; it does not establish calibrated power,
+absolute frequency accuracy, or antenna isolation. A subsequent receive session
+reported an overflow at its first sample. Repeated starts after duplex use
+remain under investigation; the successful fresh-boot burst does not qualify
+that sequence.
+
+Fresh-card testing also found that failed host SSH setup could leave open
+unauthenticated connections. The host tool now closes connections when setup
+fails. Six successive rejected old-key connections followed by a successful
+trusted connection passed on the E200; host-key checking remains strict.
+
 Hardware test artifacts and structured reports are written under
 `firmware/build/validation/`. Hardware-free checks cover firmware boot and
 persistence logic, control response validation, SPI exclusion/restoration,

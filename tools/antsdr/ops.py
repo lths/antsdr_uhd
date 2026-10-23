@@ -80,12 +80,20 @@ class SSH:
     def __enter__(self):
         import paramiko
         self.client = paramiko.SSHClient()
-        self.client.load_host_keys(str(self.known_hosts))
-        self.client.set_missing_host_key_policy(paramiko.RejectPolicy())
-        self.client.connect(self.host, username='root', password=self.password,
-                            key_filename=self.identity, timeout=5, auth_timeout=8,
-                            banner_timeout=5, allow_agent=self.password is None,
-                            look_for_keys=self.password is None)
+        try:
+            self.client.load_host_keys(str(self.known_hosts))
+            self.client.set_missing_host_key_policy(paramiko.RejectPolicy())
+            self.client.connect(self.host, username='root', password=self.password,
+                                key_filename=self.identity, timeout=5, auth_timeout=8,
+                                banner_timeout=5, allow_agent=self.password is None,
+                                look_for_keys=self.password is None)
+        except BaseException:
+            # A failed __enter__ never calls __exit__. Release the transport
+            # here so repeated host-key/authentication failures cannot fill
+            # Dropbear's unauthenticated connection limit.
+            self.client.close()
+            self.client = None
+            raise
         return self
 
     def __exit__(self, *args):

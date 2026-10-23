@@ -104,6 +104,41 @@ def release(root):
     return info
 
 
+class SSHTest(unittest.TestCase):
+    def test_failed_setup_releases_clients_before_repeated_attempts(self):
+        # A new card changes the host key. Dashboard retries must not leave
+        # unauthenticated transports behind when __enter__ fails.
+        fake=MagicMock()
+        for stage in ('load_host_keys','connect'):
+            with self.subTest(stage=stage), patch.dict('sys.modules',{'paramiko':fake}):
+                clients=[]
+                for _ in range(6):
+                    client=MagicMock()
+                    failure=RuntimeError('SSH setup failed')
+                    getattr(client,stage).side_effect=failure
+                    fake.SSHClient.return_value=client
+                    connection=ops.SSH('192.168.1.10','known_hosts','test-password')
+                    with self.assertRaises(RuntimeError) as raised:
+                        with connection:
+                            self.fail('Failed setup must not enter the context')
+                    self.assertIs(raised.exception,failure)
+                    self.assertIsNone(connection.client)
+                    clients.append(client)
+                for client in clients:
+                    client.close.assert_called_once_with()
+
+    def test_successful_session_remains_open_until_context_exit(self):
+        fake=MagicMock();client=fake.SSHClient.return_value
+        with patch.dict('sys.modules',{'paramiko':fake}):
+            with self.assertRaisesRegex(ValueError,'command failed'):
+                with ops.SSH('192.168.1.10','known_hosts','test-password') as connection:
+                    self.assertIs(connection.client,client)
+                    client.close.assert_not_called()
+                    client.set_missing_host_key_policy.assert_called_once_with(fake.RejectPolicy.return_value)
+                    raise ValueError('command failed')
+        client.close.assert_called_once_with()
+
+
 class ReleaseTest(unittest.TestCase):
     def test_console_trust_refreshes_a_prompt_discarded_during_startup(self):
         class Port:

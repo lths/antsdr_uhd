@@ -34,6 +34,12 @@ tools/run --password-env ANTSDR_PASSWORD health
 tools/run --password-env ANTSDR_PASSWORD serve
 ```
 
+A fresh SD installation creates a new SSH host key and a MAC derived from that
+card. Run `trust-console` again after swapping cards; keep the old card as a
+fallback. Failed SSH setup closes its connection immediately, including host-key
+and authentication failures, so dashboard retries do not occupy the device's
+unauthenticated connection slots.
+
 The serial port must be accessible to UID 1000. After provisioning persistent
 authorized keys, `--identity /work/path/to/private-key` or an available SSH agent
 can replace password authentication. Private keys must be provided explicitly

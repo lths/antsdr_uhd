@@ -99,6 +99,11 @@ running device with `/etc/antsdr-release.json`, use verified slot deployment
 below to retain its fallback and settings. Stock images without release metadata
 need the complete SD boot-file set for their initial migration. Do not replace or format the existing `antsdr-state.ext4` settings file.
 
+A fresh card boots the root image and creates its own private settings store,
+SSH key, and card-derived MAC. Verify the copied checksums after remounting the
+card, then run `trust-console` again after the first boot. Keep the previous SD
+card as a fallback. See [fresh-install results and remaining checks](firmware/FEATURES.md#fresh-sd-and-txrx-validation).
+
 ## Deploy, measure, and roll back
 
 With Ethernet and the serial console connected:
