@@ -34,6 +34,9 @@ def main():
     parser.add_argument('--board', required=True, choices=('e200', 'e310v2'))
     parser.add_argument('--target-dir', type=Path, required=True)
     parser.add_argument('--compiler', required=True)
+    parser.add_argument('--linux-source', type=Path)
+    parser.add_argument('--u-boot-source', type=Path)
+    parser.add_argument('--buildroot-source', type=Path)
     args = parser.parse_args()
 
     revision, dirty = 'unknown', None
@@ -54,9 +57,9 @@ def main():
         'source_dirty': dirty,
         'build_time_utc': built.strftime('%Y-%m-%dT%H:%M:%SZ'),
         'compiler': compiler,
-        'linux': make_version(args.source / 'linux/Makefile', ('VERSION', 'PATCHLEVEL', 'SUBLEVEL')),
-        'u_boot': make_version(args.source / 'u-boot-xlnx/Makefile', ('VERSION', 'PATCHLEVEL', 'SUBLEVEL')),
-        'buildroot': make_version(args.source / 'buildroot/Makefile', ('BR2_VERSION',)),
+        'linux': make_version((args.linux_source or args.source / 'linux') / 'Makefile', ('VERSION', 'PATCHLEVEL', 'SUBLEVEL')),
+        'u_boot': make_version((args.u_boot_source or args.source / 'u-boot-xlnx') / 'Makefile', ('VERSION', 'PATCHLEVEL', 'SUBLEVEL')),
+        'buildroot': make_version((args.buildroot_source or args.source / 'buildroot') / 'Makefile', ('BR2_VERSION',)),
     }
     state = {True: 'dirty', False: 'clean', None: 'unknown'}[dirty]
     identity = 'ANTSDR {} {} ({})'.format(args.board.upper(), revision, state)

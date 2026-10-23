@@ -544,6 +544,7 @@ module antsdr_e200 (
         .fp_gpio_in(fp_gpio_in), .fp_gpio_out(fp_gpio_out), .fp_gpio_ddr(fp_gpio_ddr),
 
         .pps_ref(pps_ref),
+        .external_trigger(PPS_IN_EXT),
         .pps_fpga_int(pps_fpga_int),
         .pps_select(pps_select),
 

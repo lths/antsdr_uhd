@@ -1,7 +1,8 @@
 # E200 development and operations features
 
 This checklist records implementation and validation of the requested roadmap.
-Hardware tests run on the directly connected E200; RF tests use receive only.
+Hardware tests run on the directly connected E200. RF tests include brief,
+minimum-gain 902.1 MHz bursts and simultaneous receive.
 
 - [x] Stable MAC identity across reboot
 - [x] SD-backed private configuration and persistent SSH keys
@@ -16,11 +17,17 @@ Hardware tests run on the directly connected E200; RF tests use receive only.
 - [x] Spectrum and waterfall display
 - [x] Versioned calibration records
 - [x] Trial boots, boot confirmation and automatic release fallback
+- [x] FPGA peak-level and external PPS-edge trigger modes
+- [x] Device-timed finite captures and dashboard trigger controls
+- [x] Finite transmit dashboard controls with burst acknowledgements
+- [x] Source E200 discovery, IPv4 setup and identity runtime
+- [x] Modern E200 kernel, root filesystem and packaged U-Boot build
 
 Implementation details, operation commands and measured results will be recorded
 here as each feature is validated. FPGA-resident spectrum processing requires a
 separate resource and timing assessment; the first display processes samples on
-the host. The supplied ARM control daemon remains a vendor binary.
+the host. The E200 discovery/network runtime is now built from source; E316
+retains the vendor daemon.
 
 ## Validation
 
@@ -85,6 +92,12 @@ profiles, calibration, triggers, FFT levels and dashboard access.
 
 ## FPGA assessment
 
+The hardware-trigger implementation uses 39,986/53,200 LUTs (75.16%),
+45,199/106,400 registers (42.48%), 95.5/140 block RAM tiles and 100/220 DSPs.
+Routed setup/hold slack is +0.163/+0.024 ns, with zero total negative slack.
+The build now resets top-level synthesis before implementation so edited RTL
+cannot be hidden by a completed synthesis checkpoint.
+
 The FPGA baseline before the receive-phase reset change used 39,845/53,200 LUTs (74.90%),
 44,981/106,400 registers (42.28%), 95.5/140 block RAM tiles (68.21%) and
 100/220 DSPs (45.45%). Its routed setup slack was +0.182 ns. Rebuilt timing reports are retained with
@@ -94,3 +107,40 @@ the host. An FPGA-resident FFT would need a concrete resource budget and a fresh
 implementation/timing run; it is not enabled by this release.
 
 See [the operations guide](../tools/README.md) for commands and recovery limits.
+
+## Modern runtime and hardware controls
+
+The modern profile boots Linux 6.12.114 and Buildroot 2025.02.19 with GCC 13.4.0.
+The E200 source runtime preserves the existing DNA-derived serial and discovery
+packet format. The first runtime trial exposed kernel API/configuration issues;
+it automatically rejected the unconfirmed image and booted the original root.
+The corrected trial mounted private SD state, restored MAC and SSH identity,
+negotiated gigabit Ethernet, and confirmed its slot with healthy services.
+
+Validation includes six deliberate RX backlog/restart cases, single/dual-channel
+finite device-time captures, FPGA level capture on each channel, high-threshold
+and no-external-edge timeouts, and the live dashboard capture API. A 50 ms,
+minimum-gain 902.1 MHz burst was acknowledged by the FPGA; simultaneous receive
+measured the tone approximately 34 dB above its baseline with no RX metadata
+errors. Tone, two-tone and chirp continuity and error/cancellation paths have
+host regression coverage. The licensed trigger simulation checks the triggering
+sample and timestamp, signed limits, an external pulse between sample strobes,
+stale-edge rejection, finite lengths, stop/HALT and device-time commands.
+
+U-Boot 2026.07 was chainloaded from RAM and successfully booted the modern
+runtime from SD. Slot deployment preserves the existing bootloader; consult the
+modern build guide before separately installing its packaged `BOOT.bin`.
+
+Run the receive-only trigger matrix in the host container:
+
+```sh
+python3 host/tests/ant_trigger_modes.py --expect-external-timeout \
+    --report firmware/build/validation/trigger-matrix.json
+```
+
+Physical external-edge validation remains pending because no external source is
+connected. FPGA level mode supports one RX channel; device-time and external
+edge modes support both. Hardware modes do not retain pretrigger samples. The
+modern profile currently targets SD boot on E200; QSPI update paths, E316,
+external reference clocks, RF calibration and prolonged soak tests remain
+outside the hardware validation performed here.

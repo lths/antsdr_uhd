@@ -115,6 +115,7 @@ add_files {
     ../lib/simple_gemac/mdio.v
     ../lib/control/mdio_master.v
     ../lib/vita_200/new_rx_control.v
+    ../lib/vita_200/rx_trigger.v
     ../lib/vita_200/new_rx_framer.v
     ../lib/vita_200/new_tx_control.v
     ../lib/vita_200/new_tx_deframer.v

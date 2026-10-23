@@ -20,7 +20,8 @@ module new_rx_control
     input [63:0] vita_time,
     
     // DDC connections
-    output run, output eob,
+    output run, output eob, output dsp_run, output armed,
+    input trigger_enabled, input trigger_event,
     input strobe, input full,
     input [11:0] seqnum,
     input [31:0] sid,
@@ -74,8 +75,8 @@ module new_rx_control
    always @(posedge clk)
      if (reset | clear | clear_halt)
        halt <= 1'b0;
-     else
-       halt <= set_halt;
+     else if (set_halt)
+       halt <= 1'b1;
    
    
    axi_fifo_short #(.WIDTH(96)) commandfifo
@@ -107,6 +108,7 @@ module new_rx_control
    localparam IBS_ZEROLEN      = 11;
    localparam IBS_ZERO_TIME    = 12;
    localparam IBS_ZERO_DATA    = 13;
+   localparam IBS_ARMED        = 14;
    
    reg [27:0] 	  lines_left, repeat_lines;
 
@@ -123,7 +125,9 @@ module new_rx_control
        case (ibs_state)
 	 IBS_IDLE : begin
 	   clear_halt <= 1'b0; // Incase we got here through a HALT.
-	   if (command_valid)
+	   if (halt) begin
+               clear_halt <= 1'b1;
+           end else if (command_valid)
 	     // There is a valid command to pop from FIFO.
 	     if (stop) begin
 		// Stop bit set in this command, go idle.
@@ -133,13 +137,24 @@ module new_rx_control
 		ibs_state <= IBS_LATECMD;
 	     end else if (now | send_imm) begin
 		// Either its time to run this command or it should run immediately without a time.
-		ibs_state <= IBS_RUNNING;
+		ibs_state <= trigger_enabled ? IBS_ARMED : IBS_RUNNING;
 		lines_left <= numlines;
 		repeat_lines <= numlines;
 		chain_sav <= chain;
 		reload_sav <= reload;
 	     end
 	 end // case: IBS_IDLE
+
+         IBS_ARMED : begin
+            // DSP keeps running, but no samples enter the framer until firing.
+            // A stop or HALT also cancels an arm that has not fired.
+            if (halt || !trigger_enabled || (command_valid && stop)) begin
+               ibs_state <= IBS_IDLE;
+               clear_halt <= 1'b1;
+            end else if (trigger_event) begin
+               ibs_state <= IBS_RUNNING;
+            end
+         end
 	 
 	 IBS_RUNNING : begin 
 	    if (strobe) begin 
@@ -206,10 +221,13 @@ module new_rx_control
      case(ibs_state)
        IBS_IDLE    : command_ready <= stop | late | now | send_imm;
        IBS_RUNNING : command_ready <= strobe & (lines_left == 1) & chain_sav;
+       IBS_ARMED   : command_ready <= command_valid & stop;
        default     : command_ready <= 1'b0;
      endcase // case (ibs_state)
 
    assign run = (ibs_state == IBS_RUNNING);
+   assign armed = (ibs_state == IBS_ARMED);
+   assign dsp_run = run | armed;
    assign eob = strobe && (lines_left == 1) && ( !chain_sav || (command_valid && stop) || (!command_valid && !reload_sav) || halt);
 
    always @*
@@ -238,7 +256,7 @@ module new_rx_control
        | (ibs_state == IBS_LATE_DATA) 
 	 | (ibs_state == IBS_ZERO_DATA);
    
-   assign err_tvalid_int = ibs_state >= IBS_OVERRUN;
+   assign err_tvalid_int = (ibs_state >= IBS_OVERRUN) && (ibs_state <= IBS_ZERO_DATA);
 
 
    assign debug[27:0] = lines_left;

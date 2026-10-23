@@ -18,6 +18,7 @@ module radio_legacy
     parameter NEW_HB_DECIM = 1,
     parameter SOURCE_FLOW_CONTROL = 1,
     parameter USER_SETTINGS = 0,
+    parameter HARDWARE_TRIGGER = 0,
     parameter DEVICE = "7SERIES"
   )
   (input radio_clk, input radio_rst,
@@ -25,7 +26,7 @@ module radio_legacy
    output   tx_is_running,
    input [31:0] fe_gpio_in, output [31:0] fe_gpio_out, output [31:0] fe_gpio_ddr,
    input [9:0] fp_gpio_in, output [9:0] fp_gpio_out, output [9:0] fp_gpio_ddr,
-   input pps, input time_sync,
+   input pps, input time_sync, input external_trigger,
    input bus_clk, input bus_rst,
    input [63:0]  tx_tdata, input tx_tlast, input tx_tvalid, output tx_tready,
    output [63:0] rx_tdata, output rx_tlast, output rx_tvalid, input rx_tready,
@@ -237,7 +238,7 @@ endgenerate
        3'd3 : rb_data <= {tx, rx};
        3'd4 : rb_data <= {54'h0,fp_gpio_readback};
        3'd5 : rb_data <= {59'h0,rx_flow_ctrl_busy,ibs_state[3:0]}; // Monitor state of RX state machine.
-//     3'd6 : rb_data <= <unused>;
+       3'd6 : rb_data <= HARDWARE_TRIGGER ? {32'h54524731, 29'd0, trigger_mode, trigger_armed} : 64'd0;
        3'd7 : rb_data <= rb_data_user;
        default : rb_data <= 64'd0;
      endcase // case (rb_addr)
@@ -280,7 +281,7 @@ endgenerate
    gpio_atr #(.BASE(SR_ATR), .WIDTH(32), .FAB_CTRL_EN(0), .DEFAULT_DDR(32'hFFFFFFFF), .DEFAULT_IDLE(32'h00000000)) fe_gpio_atr
      (.clk(radio_clk),.reset(radio_rst),
       .set_stb(set_stb),.set_addr(set_addr),.set_data(set_data),
-      .rx(run_rx), .tx(run_tx),
+      .rx(dsp_run_rx), .tx(run_tx),
       .gpio_in(fe_gpio_in), .gpio_out(fe_gpio_out), .gpio_ddr(fe_gpio_ddr),
       .gpio_out_fab(32'h00000000 /* no fabric control */), .gpio_sw_rb() );
 
@@ -289,7 +290,7 @@ endgenerate
          gpio_atr #(.BASE(SR_FP_GPIO), .WIDTH(10), .FAB_CTRL_EN(0)) fp_gpio_atr
             (.clk(radio_clk),.reset(radio_rst),
             .set_stb(set_stb),.set_addr(set_addr),.set_data(set_data),
-            .rx(run_rx), .tx(run_tx),
+            .rx(dsp_run_rx), .tx(run_tx),
             .gpio_in(fp_gpio_in), .gpio_out(fp_gpio_out), .gpio_ddr(fp_gpio_ddr), 
             .gpio_out_fab(10'h000 /* no fabric control */), .gpio_sw_rb(fp_gpio_readback));
       end
@@ -429,6 +430,28 @@ endgenerate
    wire 	full, eob_rx;
    wire 	strobe_rx;
    wire [31:0] 	sample_rx;
+   wire dsp_run_rx, trigger_armed;
+   wire [1:0] trigger_mode;
+   wire trigger_enabled, trigger_event;
+   wire [31:0] framed_sample;
+   wire framed_strobe;
+   wire [63:0] framed_time;
+   generate if (HARDWARE_TRIGGER) begin : hardware_trigger
+      rx_trigger trigger_gate (
+         .clk(radio_clk), .reset(radio_rst), .set_stb(set_stb),
+         .set_addr(set_addr), .set_data(set_data), .external_input(external_trigger),
+         .armed(trigger_armed), .sample(sample_rx), .strobe(strobe_rx),
+         .vita_time(vita_time), .mode(trigger_mode), .enabled(trigger_enabled),
+         .fire(trigger_event), .delayed_strobe(framed_strobe),
+         .delayed_sample(framed_sample), .delayed_time(framed_time));
+   end else begin : without_hardware_trigger
+      assign trigger_mode = 0;
+      assign trigger_enabled = 0;
+      assign trigger_event = 0;
+      assign framed_strobe = strobe_rx;
+      assign framed_sample = sample_rx;
+      assign framed_time = vita_time;
+   end endgenerate
    wire [31:0] 	  rx_sid;
    wire [11:0] 	  rx_seqnum;
    wire [63:0] rx_tdata_i; wire rx_tlast_i, rx_tvalid_i, rx_tready_i;
@@ -439,8 +462,8 @@ endgenerate
    new_rx_framer #(.BASE(SR_RX_CTRL+4),.SAMPLE_FIFO_SIZE(SAMPLE_FIFO_SIZE)) new_rx_framer
      (.clk(radio_clk), .reset(radio_rst), .clear(1'b0),
       .set_stb(set_stb), .set_addr(set_addr), .set_data(set_data),
-      .vita_time(vita_time),
-      .strobe(strobe_rx), .sample(sample_rx), .run(run_rx), .eob(eob_rx), .full(full),
+      .vita_time(framed_time),
+      .strobe(framed_strobe), .sample(framed_sample), .run(run_rx), .eob(eob_rx), .full(full),
       .sid(rx_sid), .seqnum(rx_seqnum),
       .o_tdata(rx_tdata_i), .o_tlast(rx_tlast_i), .o_tvalid(rx_tvalid_i), .o_tready(rx_tready_i),
       .debug(debug_rx_framer));
@@ -450,7 +473,9 @@ endgenerate
      (.clk(radio_clk), .reset(radio_rst), .clear(1'b0),
       .set_stb(set_stb), .set_addr(set_addr), .set_data(set_data),
       .vita_time(vita_time),
-      .strobe(strobe_rx), .run(run_rx), .eob(eob_rx), .full(full),
+      .strobe(framed_strobe), .run(run_rx), .eob(eob_rx), .full(full),
+      .dsp_run(dsp_run_rx), .armed(trigger_armed),
+      .trigger_enabled(trigger_enabled), .trigger_event(trigger_event),
       .sid(rx_sid), .seqnum(rx_seqnum),
       .err_tdata(rx_err_tdata_r), .err_tlast(rx_err_tlast_r), .err_tvalid(rx_err_tvalid_r), .err_tready(rx_err_gate & rx_err_tready_r),
       .ibs_state(ibs_state),
@@ -465,7 +490,7 @@ endgenerate
      (.clk(radio_clk), .rst(radio_rst), .clr(1'b0),
       .set_stb(set_stb),.set_addr(set_addr),.set_data(set_data),
       .rx_fe_i({rx_fe[31:16],8'd0}),.rx_fe_q({rx_fe[15:0],8'd0}),
-      .sample(sample_rx), .run(run_rx), .strobe(strobe_rx),
+      .sample(sample_rx), .run(dsp_run_rx), .strobe(strobe_rx),
       .debug(debug_ddc_chain) );
 
 `ifdef DELETE_FORMAT_CONVERSION

@@ -155,6 +155,7 @@ set e200_source_rel_files [list \
     "../lib/vita_200/float_to_iq.v" \
     "../lib/vita_200/iq_to_float.v" \
     "../lib/vita_200/new_rx_control.v" \
+    "../lib/vita_200/rx_trigger.v" \
     "../lib/vita_200/new_rx_framer.v" \
     "../lib/vita_200/new_tx_control.v" \
     "../lib/vita_200/new_tx_deframer.v" \

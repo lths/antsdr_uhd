@@ -2,7 +2,7 @@
 
 UHD host driver, FPGA sources, Linux firmware, and receive tools for MicroPhase
 ANTSDR devices. This fork adds an E200 build → deploy → measure workflow,
-recoverable firmware updates, persistent settings, and a local receive dashboard.
+recoverable firmware updates, persistent settings, and a local radio dashboard.
 
 The UHD, FPGA, and Linux sources originate from [Ettus Research](https://github.com/EttusResearch)
 and [MicroPhase](https://github.com/MicroPhase/antsdr_uhd). Hardware validation in
@@ -20,15 +20,19 @@ E316 device.
 | Health | JSON status, network counters, bounded daemon recovery, maintenance mode, and watchdog lifecycle |
 | Updates | Checksummed inactive slots, trial boot confirmation, previous-slot rollback, and original boot-file fallback |
 | Control driver | Bounded response parsing and timeouts, SPI transaction locking, and E200 receive flow control |
-| Receive tools | Named profiles, single/dual-channel I/Q capture, immediate/level/delayed triggers, and bounded pretrigger recording |
+| Receive tools | Named profiles, single/dual-channel I/Q capture, host triggers with prehistory, FPGA peak-level/external-edge triggers, and device-timed finite captures |
+| Transmit | Dashboard controls for finite tones, two-tone waveforms and chirps, timed starts, cancellation and burst-acknowledgement reports |
+| Runtime | Source-built E200 discovery/network services; optional modern Linux, Buildroot and U-Boot profile |
 | Display | Local browser dashboard with health, spectrum, and waterfall |
 | Calibration | Versioned, device-bound measurement records and frequency/relative-level corrections |
 | Validation | Hardware-free CI, structured receive benchmarks, and optional licensed firmware build runner |
 
-Spectrum processing runs on the host. Delayed and level triggers operate in the
-host receive loop. Calibration records require a measured reference; the display
+Spectrum processing runs on the host. Host RMS/delayed triggers retain prehistory;
+FPGA peak-level and PPS-edge triggers gate samples in hardware, and device-time
+captures use timed FPGA commands. FPGA level mode currently supports one RX
+channel. Calibration records require a measured reference; the display
 uses dBFS, and these tools do not establish absolute RF power or channel phase.
-The supplied ARM radio-control daemon remains a vendor binary.
+The E200 discovery/network services are built from source; E316 retains its vendor runtime.
 
 ## Connect an E200
 
@@ -60,7 +64,7 @@ tools/run --password-env ANTSDR_PASSWORD serve
 ```
 
 Open **http://127.0.0.1:8088**. The dashboard runs on the computer and permits one
-receive job at a time. The console establishes SSH host-key trust. Change
+receive or finite transmit job at a time. The console establishes SSH host-key trust. Change
 `/dev/ttyUSB0` if necessary; the serial device must be accessible to the container.
 `tools/run` handles the default port's device group. The host container defaults
 to UID 1000, so other users may need to adapt its runtime user and device mapping.
@@ -75,8 +79,14 @@ profile formats, trigger options, and data layout.
 
 The firmware flow uses **Vivado/SDK 2019.1**, Zynq-7000 support, and the SDK's
 `arm-linux-gnueabihf` compiler. Install and license those tools separately; they
-are not distributed in the build container. This tree currently retains Linux
+are not distributed in the build container. The original build retains Linux
 **5.2.28**, U-Boot **2016.07**, and Buildroot **2020.02.8**.
+
+The [modern E200 build profile](firmware/modern/README.md) builds Linux
+**6.12.114**, Buildroot **2025.02.19**, GCC **13.4.0**, and U-Boot **2026.07** from
+checksum-pinned sources. Its FPGA/FSBL still use the installed Xilinx tools.
+Runtime slot deployment preserves the installed bootloader; modern U-Boot is
+packaged separately in `BOOT.bin`.
 
 ```sh
 docker build -t antsdr-build:2019.1 firmware/docker

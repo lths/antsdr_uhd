@@ -49,6 +49,8 @@ def parser():
             c.add_argument('--pretrigger-seconds',type=float,default=0)
             c.add_argument('--trigger-timeout',type=float,default=10)
             c.add_argument('--trigger-after',type=float,help='Trigger after this many seconds of receive time')
+            c.add_argument('--trigger-mode', choices=('host','device-time','fpga-level','external-edge'), default='host')
+            c.add_argument('--device-delay',type=float,help='Device-timed start, seconds after the current device time (at least 0.1)')
         else:
             c.add_argument('--rates',nargs='+',type=float,default=[1e6,5e6,10e6])
     return p
@@ -125,11 +127,15 @@ def main(argv=None):
         results=[]
         for rate in args.rates if args.command=='benchmark' else [settings['sample_rate']]:
             setting=dict(settings,sample_rate=number(rate,1,61.44e6,'sample_rate'))
-            receiver=Receiver(args.address,setting,calibration)
+            trigger_mode=args.trigger_mode if args.command=='capture' else 'host'
+            if args.command=='capture' and trigger_mode not in ('host','fpga-level') and args.threshold_dbfs is not None:
+                raise ValueError('Threshold requires a level trigger')
+            receiver=Receiver(args.address,setting,calibration,trigger_mode=trigger_mode,
+                hardware_threshold_dbfs=args.threshold_dbfs if trigger_mode=='fpga-level' else None)
             try:
-                kwargs=({'output':args.output,'threshold_dbfs':args.threshold_dbfs,
+                kwargs=({'output':args.output,'threshold_dbfs':args.threshold_dbfs if trigger_mode=='host' else None,
                          'pretrigger_seconds':args.pretrigger_seconds,'trigger_timeout':args.trigger_timeout,
-                         'trigger_after_seconds':args.trigger_after}
+                         'trigger_after_seconds':args.trigger_after,'device_delay_seconds':args.device_delay}
                         if args.command=='capture' else {})
                 report=receiver.run(args.duration,**kwargs)
                 report['passed']=report['complete'] and not any(report[key] for key in ('overflows','timeouts','other_errors')) and report['received_samples_per_channel']>=receiver.rate*args.duration*0.9

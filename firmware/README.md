@@ -2,6 +2,10 @@
 
 English | [简体中文](README_CN.md)
 
+The [modern E200 profile](modern/README.md) builds Linux 6.12, Buildroot 2025.02
+and U-Boot 2026.07 alongside the original flow below. E200 radio discovery and
+network setup now build from [source](runtime/README.md) in both profiles.
+
 This directory builds complete boot firmware for ANTSDR E200 and E310V2,
 including:
 

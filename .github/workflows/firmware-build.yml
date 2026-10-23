@@ -19,6 +19,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Receive decimator phase regression
         run: bash firmware/fpga/tests/run_ddc_phase.sh
+      - name: Hardware receive trigger regression
+        run: bash firmware/fpga/tests/run_rx_trigger.sh
       - name: Build and verify image
         env:
           BOARD: ${{ inputs.board }}

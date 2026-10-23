@@ -1,0 +1,15 @@
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential git python3 python3-dev bc bison flex fakeroot cpio zip unzip \
+    rsync file wget curl ca-certificates pkg-config autoconf automake libtool \
+    patch gawk texinfo help2man device-tree-compiler u-boot-tools mtools \
+    libncurses-dev libssl-dev zlib1g-dev locales xz-utils bzip2 \
+    qemu-user-static python3-setuptools python3-pyelftools python3-packaging \
+    swig libgnutls28-dev uuid-dev && \
+    locale-gen en_US.UTF-8 && rm -rf /var/lib/apt/lists/*
+RUN if id ubuntu >/dev/null 2>&1; then \
+      usermod --login builder --home /home/builder --move-home ubuntu && \
+      groupmod --new-name builder ubuntu; \
+    else useradd --create-home --uid 1000 --user-group builder; fi
+USER builder
+WORKDIR /work

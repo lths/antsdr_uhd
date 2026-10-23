@@ -71,6 +71,28 @@ received block. Delayed triggers use the host's monotonic clock; they are not
 sample-accurate hardware triggers. Pretrigger memory is capped at 256 MiB and
 cleared on an overflow. Trigger wait time and receive duration are bounded.
 
+Hardware modes use the trigger-enabled E200 FPGA and an exact finite sample
+count. They cannot combine with host delay, host RMS triggering, or host
+pretrigger history:
+
+```sh
+tools/run capture --trigger-mode device-time --device-delay 0.5 --duration 0.1 \
+    --output .antsdr/captures/timed.cf32
+tools/run capture --trigger-mode fpga-level --threshold-dbfs -40 --duration 0.1 \
+    --output .antsdr/captures/fpga-level.cf32
+tools/run capture --trigger-mode external-edge --trigger-timeout 30 --duration 0.1 \
+    --output .antsdr/captures/pps.cf32
+```
+
+Device delay schedules the start against the current device clock, after final
+stream setup. FPGA level mode compares each post-DDC sample's peak `|I|` or
+`|Q|` with a 16-bit threshold; it supports one selected channel. The triggering
+sample and its timestamp are retained. External mode latches a rising edge on
+the external PPS input until the next sample; pulses that occurred before
+arming do not fire a new capture. Verify the connector's electrical limits
+before wiring a source. An untriggered finite capture reports `complete: false`.
+Old FPGA images reject hardware level/edge modes explicitly.
+
 Files contain little-endian complex float32, interleaved by sample then channel.
 Each `.cf32.json` sidecar records requested and actual settings, device serial,
 device sample timestamps, trigger details, calibration, errors and discontinuities.
@@ -83,8 +105,17 @@ time origin was reset. The FPGA also resets halfband decimation phase while
 idle so different previous channel histories do not offset the next dual start.
 
 The dashboard can edit profiles, select a profile, preview a spectrum/waterfall,
-and record immediate, delayed or level-triggered captures. Saved files remain in
+and record host- or hardware-triggered captures. Saved files remain in
 the local state directory. Spectrum levels use dBFS; they are not absolute dBm.
+
+The transmit panel generates finite tones, symmetric two-tone signals, or linear
+chirps. It exposes channel, center frequency, sample rate, bandwidth, gain,
+digital amplitude, duration and timed-start delay. Bursts are bounded to two
+seconds and two million samples. Transmit and receive jobs share one exclusive
+radio owner. Stop ends the sample feed; queued samples may finish. Reports in
+`.antsdr/transmit/` record actual settings, sent sample count and asynchronous
+events. Completion requires the FPGA burst acknowledgement; errors do not report
+success. The transmitter restores minimum gain after completion or cancellation.
 
 ## Calibration and persistent settings
 

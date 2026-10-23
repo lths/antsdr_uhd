@@ -1,0 +1,17 @@
+{
+  "buildroot": {
+    "version": "2025.02.19",
+    "url": "https://buildroot.org/downloads/buildroot-2025.02.19.tar.xz",
+    "sha256": "e5e58bff1da91f022f60cefdfe280140c08023cd0aeec1e5f6f9da0ea866d69c"
+  },
+  "linux": {
+    "version": "6.12.114",
+    "url": "https://www.kernel.org/pub/linux/kernel/v6.x/linux-6.12.114.tar.xz",
+    "sha256": "7a8589912bd7a8adb07fed074283652cf482a35facef8954554654f0154b4af3"
+  },
+  "u-boot": {
+    "version": "2026.07",
+    "url": "https://ftp.denx.de/pub/u-boot/u-boot-2026.07.tar.bz2",
+    "sha256": "78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e"
+  }
+}

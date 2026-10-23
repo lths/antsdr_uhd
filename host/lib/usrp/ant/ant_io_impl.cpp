@@ -408,6 +408,18 @@ rx_streamer::sptr ant_impl::get_rx_stream(const uhd::stream_args_t& args_)
         args.otw_format = "sc16";
     args.channels = args.channels.empty() ? std::vector<size_t>(1, 0) : args.channels;
 
+    const std::string trigger = args.args.get("trigger", "none");
+    if (trigger != "none" && trigger != "level" && trigger != "external") {
+        throw uhd::value_error("ANT RX trigger must be none, level, or external");
+    }
+    if (trigger == "level" && args.channels.size() != 1) {
+        throw uhd::value_error("FPGA level triggering currently requires one RX channel");
+    }
+    const unsigned threshold = args.args.cast<unsigned>("trigger_level", 32768);
+    if (threshold > 32768) {
+        throw uhd::value_error("ANT trigger_level must be within 0..32768 (peak I/Q counts)");
+    }
+
     if (_tree->access<bool>("/mboards/0/auto_tick_rate").get()) {
         set_auto_tick_rate(0, "", args.channels.size());
     }
@@ -420,6 +432,18 @@ rx_streamer::sptr ant_impl::get_rx_stream(const uhd::stream_args_t& args_)
                 .get()
                 .at(args.channels[stream_i]);
         radio_perifs_t& perif = _radio_perifs[radio_index];
+        const bool has_trigger = _antsdr_product == antsdr_product_t::E200
+            && (perif.ctrl->peek64(RB64_RX_TRIGGER) >> 32) == 0x54524731;
+        if (trigger != "none" && !has_trigger) {
+            throw uhd::value_error("Connected FPGA does not support hardware RX triggers");
+        }
+        if (has_trigger) {
+            // Cancel any previous arm before programming the new stream.
+            perif.ctrl->poke32(TOREG(SR_RX_TRIGGER), 0);
+            perif.ctrl->poke32(TOREG(SR_RX_THRESHOLD), threshold);
+            perif.ctrl->poke32(TOREG(SR_RX_TRIGGER),
+                trigger == "level" ? 1 : trigger == "external" ? 2 : 0);
+        }
         if (args.otw_format == "sc16")
             perif.ctrl->poke32(TOREG(SR_RX_FMT), 0);
         if (args.otw_format == "sc12")

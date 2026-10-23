@@ -1,4 +1,4 @@
-"""Loopback-only dashboard: a single receive owner and read-only device health."""
+"""Loopback dashboard with one exclusive RX/TX job and read-only health."""
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -9,7 +9,8 @@ from urllib.parse import urlsplit
 
 from . import ops
 from .radio import Receiver
-from .store import name, number, utc
+from .store import atomic_json, name, number, utc
+from .transmit import Transmitter, settings as transmit_settings
 
 
 class Application:
@@ -35,7 +36,11 @@ class Application:
             self.closed.wait(3)
 
     def start(self, request):
-        if set(request)-{'kind','profile','duration','threshold_dbfs','pretrigger_seconds','trigger_timeout','trigger_after_seconds','capture_name'}:
+        if not isinstance(request, dict):
+            raise ValueError('A radio job must be a JSON object')
+        if request.get('kind') == 'transmit':
+            return self.start_transmit(request)
+        if set(request)-{'kind','profile','duration','threshold_dbfs','pretrigger_seconds','trigger_timeout','trigger_after_seconds','capture_name','trigger_mode','device_delay_seconds'}:
             raise ValueError('Unknown job field')
         kind = request.get('kind')
         if kind not in ('spectrum', 'capture'):
@@ -45,6 +50,22 @@ class Application:
         pretrigger = number(request.get('pretrigger_seconds', 0), 0, 5, 'pretrigger_seconds')
         trigger_timeout = number(request.get('trigger_timeout', 10), 0.1, 3600, 'trigger_timeout')
         threshold = request.get('threshold_dbfs')
+        trigger_mode = request.get('trigger_mode', 'host')
+        device_delay = request.get('device_delay_seconds')
+        if trigger_mode not in ('host', 'device-time', 'fpga-level', 'external-edge'):
+            raise ValueError('Unsupported trigger mode')
+        if trigger_mode != 'host' and (pretrigger or request.get('trigger_after_seconds') is not None):
+            raise ValueError('Hardware triggering cannot use host delay or pretrigger history')
+        if trigger_mode == 'fpga-level':
+            number(threshold, -90, 0, 'threshold_dbfs')
+            if len(settings['channels']) != 1:
+                raise ValueError('FPGA level triggering currently requires one RX channel')
+        elif trigger_mode != 'host' and threshold is not None:
+            raise ValueError('Threshold requires a level trigger')
+        if trigger_mode == 'device-time':
+            number(device_delay, .1, trigger_timeout, 'device_delay_seconds')
+        elif device_delay is not None:
+            raise ValueError('Device delay requires device-time triggering')
         trigger_after = request.get('trigger_after_seconds')
         if trigger_after is not None:
             number(trigger_after,0,trigger_timeout,'trigger_after_seconds')
@@ -58,7 +79,7 @@ class Application:
         calibration = self.store.get('calibrations', settings['calibration']) if settings.get('calibration') else None
         with self.lock:
             if self.thread and self.thread.is_alive():
-                raise ValueError('A receive job is already running')
+                raise ValueError('A radio job is already running')
             self.cancel.clear()
             self.state['frame'] = None
             self.state['job'] = {'kind':kind, 'status':'starting', 'started_at_utc':utc()}
@@ -70,12 +91,14 @@ class Application:
             def worker():
                 receiver = None
                 try:
-                    receiver = Receiver(self.host, settings, calibration)
+                    receiver = Receiver(self.host, settings, calibration, trigger_mode=trigger_mode,
+                                        hardware_threshold_dbfs=threshold if trigger_mode == 'fpga-level' else None)
                     with self.lock:
                         self.state['job']['status'] = 'receiving'
-                    result = receiver.run(duration, output=output, threshold_dbfs=threshold,
+                    result = receiver.run(duration, output=output, threshold_dbfs=threshold if trigger_mode == 'host' else None,
                                           pretrigger_seconds=pretrigger, trigger_timeout=trigger_timeout,
-                                          on_spectrum=frame, cancel=self.cancel, trigger_after_seconds=trigger_after)
+                                          on_spectrum=frame, cancel=self.cancel, trigger_after_seconds=trigger_after,
+                                          device_delay_seconds=device_delay)
                     with self.lock:
                         self.state['job'].update(status='complete' if result['complete'] else 'stopped', report=result)
                         if output: self.state['job']['capture_file'] = output.name
@@ -85,6 +108,51 @@ class Application:
                 finally:
                     if receiver:
                         receiver.close()
+            self.thread = threading.Thread(target=worker, daemon=True)
+            self.thread.start()
+
+    def start_transmit(self, request):
+        if set(request) - {'kind', 'settings'}:
+            raise ValueError('Unknown transmit job field')
+        config = transmit_settings(request.get('settings', {}))
+        with self.lock:
+            if self.thread and self.thread.is_alive():
+                raise ValueError('A radio job is already running')
+            self.cancel.clear()
+            self.state['frame'] = None
+            self.state['job'] = {'kind': 'transmit', 'status': 'starting',
+                                 'started_at_utc': utc(), 'settings': config}
+
+            def progress(sent, total):
+                with self.lock:
+                    self.state['job'].update(status='transmitting', samples_sent=sent,
+                                             planned_samples=total)
+
+            def worker():
+                transmitter = None
+                destination = self.store.root/'transmit'/('burst-'+str(time.time_ns())+'.json')
+                try:
+                    transmitter = Transmitter(self.host, config)
+                    with self.lock:
+                        self.state['job']['status'] = 'scheduled'
+                    result = transmitter.run(self.cancel, progress)
+                    transmitter.close()
+                    transmitter = None
+                    atomic_json(destination, result)
+                    with self.lock:
+                        self.state['job'].update(status='complete' if result['complete'] else 'stopped',
+                                                 report=result, report_file=destination.name)
+                except Exception as error:
+                    failed = transmitter.report if transmitter else None
+                    if failed:
+                        atomic_json(destination, failed)
+                    with self.lock:
+                        self.state['job'].update(status='failed', error=str(error))
+                        if failed:
+                            self.state['job'].update(report=failed, report_file=destination.name)
+                finally:
+                    if transmitter:
+                        transmitter.close()
             self.thread = threading.Thread(target=worker, daemon=True)
             self.thread.start()
 

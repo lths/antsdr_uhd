@@ -46,6 +46,7 @@ module b200_core
     output [7:0] fe0_gpio_out, output [7:0] fe1_gpio_out,
     input [9:0] fp_gpio_in, output [9:0] fp_gpio_out, output [9:0] fp_gpio_ddr,
     input 	  pps_ref,
+    input external_trigger,
     output    pps_fpga_int,
     output [1:0] pps_select,
 
@@ -302,10 +303,11 @@ module b200_core
       .NEW_HB_DECIM(1),
       .SOURCE_FLOW_CONTROL(1),
       .USER_SETTINGS(0),
+      .HARDWARE_TRIGGER(1),
       .DEVICE("7SERIES")
    ) radio_0 (
       .radio_clk(radio_clk), .radio_rst(radio_rst),
-      .rx(rx0), .tx(tx0), .pps(pps), .time_sync(time_sync_r),
+      .rx(rx0), .tx(tx0), .pps(pps), .time_sync(time_sync_r), .external_trigger(external_trigger),
       .fe_gpio_in(32'h00000000), .fe_gpio_out(fe0_gpio_out32), .fe_gpio_ddr(/* Always assumed to be outputs */),
       .fp_gpio_in(fp_gpio_in), .fp_gpio_out(fp_gpio_out), .fp_gpio_ddr(fp_gpio_ddr),
       .bus_clk(bus_clk), .bus_rst(bus_rst),
@@ -334,10 +336,11 @@ module b200_core
       .NEW_HB_DECIM(1),
       .SOURCE_FLOW_CONTROL(1),
       .USER_SETTINGS(0),
+      .HARDWARE_TRIGGER(1),
       .DEVICE("7SERIES")
    ) radio_1 (
       .radio_clk(radio_clk), .radio_rst(radio_rst),
-      .rx(rx1), .tx(tx1), .pps(pps), .time_sync(time_sync_r),
+      .rx(rx1), .tx(tx1), .pps(pps), .time_sync(time_sync_r), .external_trigger(external_trigger),
       .fe_gpio_in(32'h00000000), .fe_gpio_out(fe1_gpio_out32), .fe_gpio_ddr(/* Always assumed to be outputs */),
       .fp_gpio_in(32'h00000000), .fp_gpio_out(), .fp_gpio_ddr(),
       .bus_clk(bus_clk), .bus_rst(bus_rst),

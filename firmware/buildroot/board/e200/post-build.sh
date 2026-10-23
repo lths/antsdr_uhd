@@ -90,3 +90,12 @@ install -d -m 0700 "${TARGET_DIR}/etc/antsdr"
 
 ${BR2_TOOLCHAIN_EXTERNAL_PREFIX}-gcc -D_DEFAULT_SOURCE -std=c11 -O2 -Wall -Wextra -Werror \
     "${BOARD_DIR}/../antsdr/health.c" -o "${TARGET_DIR}/usr/sbin/antsdr-health"
+
+# E200 discovery/network setup is built from source. Keep distinct executable
+# paths because the supervisor verifies /proc/PID/exe against each PID file.
+${BR2_TOOLCHAIN_EXTERNAL_PREFIX}-gcc -std=c11 -O2 -Wall -Wextra -Werror \
+    -fstack-protector-strong -D_FORTIFY_SOURCE=2 \
+    "${BOARD_DIR}/../../../runtime/radio.c" "${BOARD_DIR}/../../../runtime/md5.c" \
+    -o "${TARGET_DIR}/sbin/e200"
+${INSTALL} -m 0755 "${TARGET_DIR}/sbin/e200" "${TARGET_DIR}/sbin/net_set"
+${INSTALL} -m 0755 "${TARGET_DIR}/sbin/e200" "${TARGET_DIR}/bin/ip_set"

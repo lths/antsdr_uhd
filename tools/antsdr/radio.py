@@ -61,10 +61,20 @@ class Trigger:
 
 
 class Receiver:
-    def __init__(self, address, settings, calibration=None):
+    def __init__(self, address, settings, calibration=None, trigger_mode='host', hardware_threshold_dbfs=None):
         import uhd
         self.uhd = uhd
         self.settings = profile(settings)
+        if trigger_mode not in ('host', 'device-time', 'fpga-level', 'external-edge'):
+            raise ValueError('Unsupported trigger mode')
+        if trigger_mode == 'fpga-level':
+            number(hardware_threshold_dbfs, -90, 0, 'hardware_threshold_dbfs')
+            if len(self.settings['channels']) != 1:
+                raise ValueError('FPGA level triggering currently requires one RX channel')
+        elif hardware_threshold_dbfs is not None:
+            raise ValueError('Hardware threshold requires FPGA level triggering')
+        self.trigger_mode = trigger_mode
+        self.hardware_threshold_dbfs = hardware_threshold_dbfs
         self.calibration = calibration
         self.device = uhd.usrp.MultiUSRP('type=ant,addr='+address)
         self.serial = self.device.get_usrp_rx_info(self.settings['channels'][0]).get('mboard_serial', '')
@@ -90,6 +100,11 @@ class Receiver:
         self.rate = self.device.get_rx_rate(self.settings['channels'][0])
         stream_args = uhd.usrp.StreamArgs('fc32', 'sc16')
         stream_args.channels = self.settings['channels']
+        if trigger_mode in ('fpga-level', 'external-edge'):
+            trigger_args = 'trigger=' + ('level' if trigger_mode == 'fpga-level' else 'external')
+            if trigger_mode == 'fpga-level':
+                trigger_args += ',trigger_level=' + str(max(1, round(32768*10**(hardware_threshold_dbfs/20))))
+            stream_args.args = trigger_args
         self.stream = self.device.get_rx_stream(stream_args)
         if len(self.settings['channels']) > 1:
             # Final MIMO activation may change the clock. Synchronize only after
@@ -105,10 +120,20 @@ class Receiver:
         self.device = None
 
     def run(self, duration, output=None, threshold_dbfs=None, pretrigger_seconds=0,
-            trigger_timeout=10, on_spectrum=None, cancel=None, bins=1024, trigger_after_seconds=None):
+            trigger_timeout=10, on_spectrum=None, cancel=None, bins=1024, trigger_after_seconds=None,
+            device_delay_seconds=None):
         import numpy as np
         number(duration, 0.01, 3600, 'duration')
         number(trigger_timeout, 0.1, 3600, 'trigger_timeout')
+        if self.trigger_mode != 'host':
+            if threshold_dbfs is not None or trigger_after_seconds is not None or pretrigger_seconds:
+                raise ValueError('Hardware triggers cannot use host triggers or host pretrigger history')
+            if self.trigger_mode == 'device-time':
+                number(device_delay_seconds, .1, trigger_timeout, 'device_delay_seconds')
+            elif device_delay_seconds is not None:
+                raise ValueError('Device delay requires device-time triggering')
+        elif device_delay_seconds is not None:
+            raise ValueError('Device delay requires device-time triggering')
         if trigger_after_seconds is not None:
             number(trigger_after_seconds, 0, trigger_timeout, 'trigger_after_seconds')
             if threshold_dbfs is not None:
@@ -120,10 +145,17 @@ class Receiver:
         metadata = self.uhd.types.RXMetadata()
         count = max(1024, min(16384, int(self.stream.get_max_num_samps())))
         buffer = np.empty((len(self.settings['channels']), count), dtype=np.complex64)
-        start_cmd = self.uhd.types.StreamCMD(self.uhd.types.StreamMode.start_cont)
-        start_cmd.stream_now = len(self.settings['channels']) == 1
+        hardware_samples = round(duration*self.rate) if self.trigger_mode != 'host' else None
+        start_cmd = self.uhd.types.StreamCMD(self.uhd.types.StreamMode.num_done if hardware_samples
+                                            else self.uhd.types.StreamMode.start_cont)
+        if hardware_samples:
+            if hardware_samples > (1 << 28)-1:
+                raise ValueError('Hardware capture exceeds the FPGA finite-command sample limit')
+            start_cmd.num_samps = hardware_samples
+        start_cmd.stream_now = self.trigger_mode == 'host' and len(self.settings['channels']) == 1
         if not start_cmd.stream_now:
-            start_cmd.time_spec = self.uhd.types.TimeSpec(self.device.get_time_now().get_real_secs()+0.1)
+            start_cmd.time_spec = self.uhd.types.TimeSpec(self.device.get_time_now().get_real_secs()+
+                (device_delay_seconds if self.trigger_mode == 'device-time' else .1))
         report = {'schema_version':1, 'started_at_utc':utc(), 'device_serial':self.serial,
                   'requested':self.settings, 'actual':self.actual, 'calibration':self.calibration,
                   'format':'little-endian complex float32, sample-major interleaved channels',
@@ -131,6 +163,10 @@ class Receiver:
                   'overflows':0, 'timeouts':0, 'other_errors':0, 'triggered':False,
                   'first_sample_device_time':None, 'complete':False, 'discontinuities':[]}
         report['trigger_kind'] = 'host-delay' if trigger_after_seconds is not None else 'level' if threshold_dbfs is not None else 'immediate'
+        if self.trigger_mode != 'host':
+            report['trigger_kind'] = self.trigger_mode
+            report['hardware_threshold_dbfs'] = self.hardware_threshold_dbfs
+            report['scheduled_device_time'] = start_cmd.time_spec.get_real_secs()
         report['device_time_reset_for_alignment'] = len(self.settings['channels']) > 1
         handles = None
         if output:
@@ -146,13 +182,17 @@ class Receiver:
         try:
             self.stream.issue_stream_cmd(start_cmd)
             while not (cancel and cancel.is_set()):
+                if hardware_samples and report['saved_samples_per_channel'] >= hardware_samples:
+                    break
                 elapsed = time.monotonic()-start
                 if (finish is not None and time.monotonic() >= finish) or (finish is None and elapsed >= trigger_timeout):
                     break
                 n = self.stream.recv(buffer, metadata, 0.25)
                 error = metadata.error_code
                 if error == self.uhd.types.RXMetadataErrorCode.timeout:
-                    report['timeouts'] += 1
+                    # A gated FPGA produces no packets while waiting for its event.
+                    if self.trigger_mode == 'host' or report['triggered']:
+                        report['timeouts'] += 1
                     continue
                 if error == self.uhd.types.RXMetadataErrorCode.overflow:
                     report['overflows'] += 1
@@ -176,7 +216,7 @@ class Receiver:
                     report['pretrigger_samples_per_channel'] = sum(b.shape[1] for b in accepted[:-1])
                     report['trigger_sample_device_time'] = metadata.time_spec.get_real_secs()
                     report['first_saved_sample_device_time'] = metadata.time_spec.get_real_secs()-report['pretrigger_samples_per_channel']/self.rate
-                    finish = time.monotonic()+duration
+                    finish = time.monotonic()+duration+(1 if hardware_samples else 0)
                 for saved in accepted:
                     if handles:
                         np.asarray(saved.T, dtype='<c8').tofile(handles)
@@ -187,7 +227,9 @@ class Receiver:
                     frame['time_utc'] = utc()
                     on_spectrum(frame)
                     last_frame = time.monotonic()
-            report['complete'] = report['triggered'] and (finish is not None and time.monotonic() >= finish)
+            report['complete'] = report['triggered'] and (
+                report['saved_samples_per_channel'] == hardware_samples if hardware_samples else
+                finish is not None and time.monotonic() >= finish)
         finally:
             try:
                 self.stream.issue_stream_cmd(self.uhd.types.StreamCMD(self.uhd.types.StreamMode.stop_cont))

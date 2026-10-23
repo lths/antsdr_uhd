@@ -31,6 +31,8 @@ localparam SR_CODEC_IDLE   = 22;
 localparam SR_READBACK     = 32;
 localparam SR_TX_CTRL      = 64;
 localparam SR_RX_CTRL      = 96;
+localparam SR_RX_TRIGGER   = 104;
+localparam SR_RX_THRESHOLD = 105;
 localparam SR_RX_DSP       = 144;
 localparam SR_TX_DSP       = 184;
 localparam SR_TIME         = 128;
@@ -45,6 +47,7 @@ localparam RB64_TIME_NOW       = 8;
 localparam RB64_TIME_PPS       = 16;
 localparam RB64_CODEC_READBACK = 24;
 localparam RB32_FP_GPIO        = 32;
+localparam RB64_RX_TRIGGER     = 48;
 
 // pll constants
 static const int AD9361_SLAVENO      = (1 << 0);
