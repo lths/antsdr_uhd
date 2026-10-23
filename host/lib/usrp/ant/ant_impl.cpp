@@ -6,6 +6,7 @@
 //
 
 #include "ant_impl.hpp"
+#include "ant_lease.hpp"
 #include "ant_regs.hpp"
 #include "uhd/cal/database.hpp"
 #include "uhd/config.hpp"
@@ -421,6 +422,14 @@ ant_impl::ant_impl(const uhd::device_addr_t &device_addr)
             _antsdr_product = antsdr_product_t::UNKNOWN;
         }
         const std::string addr = device_addr["addr"];
+        if (_antsdr_product != antsdr_product_t::E310V2) {
+            if (device_addr.has_key("legacy_no_lease") && device_addr["legacy_no_lease"] == "1") {
+                UHD_LOGGER_WARNING("ANT") << "Device lease disabled for legacy firmware";
+            } else {
+                _device_lease.reset(new ant_device_lease(
+                    udp_simple::make_connected(addr, "49101")));
+            }
+        }
         UHD_LOGGER_INFO("ANT") << "Detected Device: ANTSDR";
 
         mboard_eeprom_t mb_eeprom;

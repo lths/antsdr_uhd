@@ -15,15 +15,15 @@ E316 device.
 | Area | What is included |
 | --- | --- |
 | Build | Parallel kernel/device-tree ordering, board-aware HDF selection, job limits, and firmware source/build metadata |
-| Device identity | Preserve a valid factory MAC; otherwise persist a card-derived local MAC |
+| Device identity | EEPROM board revision and DNA serial; preserve a valid factory MAC or persist a card-derived local MAC |
 | Settings | Private SD-backed configuration, receive profiles, SSH keys, and credential snapshots |
 | Health | JSON status, network counters, bounded daemon recovery, maintenance mode, and watchdog lifecycle |
 | Updates | Checksummed inactive slots, trial boot confirmation, previous-slot rollback, and original boot-file fallback |
 | Control driver | Bounded response parsing and timeouts, SPI transaction locking, and E200 receive flow control |
 | Receive tools | Named profiles, single/dual-channel I/Q capture, host triggers with prehistory, FPGA peak-level/external-edge triggers, and device-timed finite captures |
 | Transmit | Dashboard controls for finite tones, two-tone waveforms and chirps, timed starts, cancellation and burst-acknowledgement reports |
-| Runtime | Source-built E200 discovery/network services; optional modern Linux, Buildroot and U-Boot profile |
-| Display | Local browser dashboard with health, spectrum, and waterfall |
+| Runtime | Unprivileged E200 services, FPGA compatibility checks, Netlink network updates, driver register readback, and device ownership leases |
+| Display | Local browser dashboard with health, daemon diagnostics, device ownership, spectrum, and waterfall |
 | Calibration | Versioned, device-bound measurement records and frequency/relative-level corrections |
 | Validation | Hardware-free CI, structured receive benchmarks, and optional licensed firmware build runner |
 
@@ -33,6 +33,11 @@ captures use timed FPGA commands. FPGA level mode currently supports one RX
 channel. Calibration records require a measured reference; the display
 uses dBFS, and these tools do not establish absolute RF power or channel phase.
 The E200 discovery/network services are built from source; E316 retains its vendor runtime.
+Runtime 2 requires matching FPGA, kernel, and host software. The host acquires a
+three-second device lease and renews it every half second. Expiry stops the radio
+and rejects old queued TX samples across ownership changes. Older E200 firmware
+can be opened explicitly with `legacy_no_lease=1`; that option does not bypass
+new FPGA enforcement. See [runtime management](firmware/runtime/README.md).
 
 ## Connect an E200
 

@@ -8,6 +8,8 @@
 module eth_interface #(
   parameter [15:0] PROTOVER    = {8'd1, 8'd0},
   parameter [31:0] DEFAULT_IP_ADDR_INT   = {8'd192, 8'd168, 8'd1, 8'd10},
+  parameter        REQUIRE_LEASE = 0,
+  parameter        CLOCK_HZ = 100000000,
   parameter        MTU         = 10,
   parameter        NODE_INST   = 0,
   parameter        RT_TBL_SIZE = 6,
@@ -16,6 +18,8 @@ module eth_interface #(
 ) (
   input         clk,
   input         reset,
+  output        lease_active,
+  output [31:0] session_epoch,
   input [15:0]  device_id,
 
   // Register port: Write port (domain: clk)
@@ -88,6 +92,29 @@ module eth_interface #(
   localparam [REG_AWIDTH-1:0] REG_MAC_LSB        = BASE + 'h0000;
   localparam [REG_AWIDTH-1:0] REG_MAC_MSB        = BASE + 'h0004;
   localparam [REG_AWIDTH-1:0] REG_MAC_MASK       = BASE + 'h0008;
+  // Management ABI v1: signature/version are read-only. Lease timeout is
+  // bounded to 3 seconds and runs independently of the PS or host software.
+  localparam [REG_AWIDTH-1:0] REG_COMPAT = BASE + 'h000c;
+  localparam [REG_AWIDTH-1:0] REG_VERSION = BASE + 'h0010;
+  localparam [REG_AWIDTH-1:0] REG_OWNER = BASE + 'h0014;
+  localparam [REG_AWIDTH-1:0] REG_LEASE = BASE + 'h0018;
+  localparam [REG_AWIDTH-1:0] REG_EXPIRED = BASE + 'h001c;
+  wire [31:0] owner_ip, lease_ms, expired_count;
+  wire lease_valid;
+  antsdr_lease_watchdog #(.CLOCK_HZ(CLOCK_HZ)) lease_watchdog (
+    .clk(clk), .reset(reset),
+    .set_owner(reg_wr_req && reg_wr_addr == REG_OWNER),
+    .set_timeout(reg_wr_req && reg_wr_addr == REG_LEASE),
+    .write_data(reg_wr_data), .owner_ip(owner_ip), .remaining_ms(lease_ms),
+    .expired_count(expired_count), .session_epoch(session_epoch), .active(lease_valid));
+  assign lease_active = !REQUIRE_LEASE || lease_valid;
+  reg lease_was_active;
+  always @(posedge clk) begin
+    if (reset) lease_was_active <= 0;
+    else lease_was_active <= lease_active;
+  end
+  wire lease_fell = REQUIRE_LEASE && lease_was_active && !lease_active;
+
   // Source IP address
   localparam [REG_AWIDTH-1:0] REG_IP             = BASE + 'h1000;
   // Source UDP Port
@@ -130,6 +157,7 @@ module eth_interface #(
 
   always @(posedge clk) begin
     if (reset) begin
+      mac_mask        <= 0;
       mac_reg         <= DEFAULT_MAC_ADDR;
       ip_reg          <= DEFAULT_IP_ADDR;
       udp_port        <= DEFAULT_UDP_PORT;
@@ -181,6 +209,11 @@ module eth_interface #(
       // Assert read response one cycle after read request
       reg_rd_resp <= 1'b1;
       case (reg_rd_addr)
+        REG_COMPAT: reg_rd_data <= REQUIRE_LEASE ? 32'h414d4731 : 0;
+        REG_VERSION: reg_rd_data <= 32'h00010000;
+        REG_OWNER: reg_rd_data <= owner_ip;
+        REG_LEASE: reg_rd_data <= lease_ms;
+        REG_EXPIRED: reg_rd_data <= expired_count;
         REG_MAC_LSB:
           reg_rd_data <= mac_reg[31:0];
 
@@ -233,10 +266,13 @@ module eth_interface #(
     .RT_TBL_SIZE     (RT_TBL_SIZE),
     .NODE_INST       (NODE_INST),
     .DROP_UNKNOWN_MAC(0),
-    .IS_CPU_ARM      (1)
+    .IS_CPU_ARM      (1),
+    .REQUIRE_LEASE   (REQUIRE_LEASE)
   ) eth_adapter_i (
     .clk             (clk          ),
-    .rst             (reset        ),
+    .rst             (reset | lease_fell),
+    .lease_active    (lease_active),
+    .owner_ip        (owner_ip),
     .device_id       (device_id    ),
     .s_mac_tdata     (eth_rx_tdata ),
     .s_mac_tuser     (eth_rx_tuser ),
@@ -306,3 +342,39 @@ module eth_interface #(
 
 
 endmodule // eth_interface
+
+// A registered fail-closed gate keeps the millisecond counter/comparator off
+// the high-fanout radio reset path. Owner changes always start a fresh epoch.
+module antsdr_lease_watchdog #(parameter CLOCK_HZ=100000000) (
+  input clk, reset, set_owner, set_timeout,
+  input [31:0] write_data,
+  output reg [31:0] owner_ip, expired_count, session_epoch,
+  output [31:0] remaining_ms,
+  output reg active
+);
+  reg [11:0] ms;
+  localparam DIV_W=$clog2(CLOCK_HZ/1000);
+  reg [DIV_W-1:0] divider;
+  assign remaining_ms={20'd0,ms};
+  always @(posedge clk) begin
+    if (reset) begin
+      ms<=0; divider<=0; owner_ip<=0; active<=0;
+      expired_count<=0; session_epoch<=0;
+    end else begin
+      if (divider == CLOCK_HZ/1000-1) begin
+        divider<=0;
+        if (ms != 0) begin
+          ms<=ms-1;
+          if (ms == 1) begin active<=0; expired_count<=expired_count+1; end
+        end
+      end else divider<=divider+1;
+      if (set_owner) begin
+        owner_ip<=write_data; ms<=0; active<=0;
+        if (write_data != 0) session_epoch<=session_epoch+1;
+      end else if (set_timeout) begin
+        ms<=write_data>3000?3000:write_data[11:0]; divider<=0;
+        active<=write_data!=0 && owner_ip!=0;
+      end
+    end
+  end
+endmodule

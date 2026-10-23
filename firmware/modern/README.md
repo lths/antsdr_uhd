@@ -9,8 +9,11 @@ available for recovery and E316 builds.
 The FPGA and FSBL still use Vivado/SDK 2019.1. Modernization of the CPU runtime
 does not replace the licensed FPGA toolchain. The kernel port retains the E200
 NIC's DMA, flow-control and PHY changes, adapts the 6.12 interfaces, and omits the
-legacy `/dev/dummy_char` interface. The source runtime accesses only the three
-required FPGA register areas through `/dev/mem`.
+legacy `/dev/dummy_char` interface. Runtime 2 uses a narrow NIC sysfs API;
+its daemons do not open `/dev/mem` and run as separate unprivileged numeric UIDs.
+The device tree reserves the FPGA TX queue's 64 MiB DDR window at `0x18000000`.
+See [runtime management](../runtime/README.md) for the compatibility ABI,
+network handling, discovery identity, diagnostics, and ownership protocol.
 
 Build from the repository root:
 

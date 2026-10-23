@@ -16,5 +16,13 @@ set status [get_property STATUS [get_runs impl_1]]
 if {![string match "*Complete*" $status]} {
     error "implementation did not complete successfully: $status"
 }
+open_run impl_1
+foreach delay_type {max min} {
+    set paths [get_timing_paths -quiet -delay_type $delay_type -max_paths 1]
+    if {[llength $paths] == 0} { error "no $delay_type timing path available" }
+    set slack [get_property SLACK [lindex $paths 0]]
+    puts "Release timing $delay_type slack: $slack ns"
+    if {$slack < 0} { error "release timing failed: $delay_type slack $slack ns" }
+}
 puts "Bitstream implementation complete: $status"
 close_project

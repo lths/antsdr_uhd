@@ -4,7 +4,7 @@ CFLAGS ?= -O2 -std=c11 -Wall -Wextra -Werror -fstack-protector-strong -D_FORTIFY
 OUT ?= build
 .PHONY: all install clean
 all: $(OUT)/e200
-$(OUT)/e200: radio.c md5.c md5.h
+$(OUT)/e200: radio.c md5.c md5.h management.h
 	mkdir -p $(OUT)
 	$(CC) $(CFLAGS) radio.c md5.c $(LDFLAGS) -o $@
 install: all

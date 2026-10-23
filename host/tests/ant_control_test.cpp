@@ -1,13 +1,83 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "common/mock_zero_copy.hpp"
 #include "../lib/usrp/ant/ant_cores.hpp"
+#include "../lib/usrp/ant/ant_lease.hpp"
 #include <uhdlib/usrp/cores/radio_ctrl_core_3000.hpp>
 #include <uhd/utils/byteswap.hpp>
 #include <boost/test/unit_test.hpp>
 #include <future>
+#include <cstring>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
+
+class lease_transport : public uhd::transport::udp_simple {
+public:
+    size_t send(const boost::asio::const_buffer& buffer) override {
+        std::lock_guard<std::mutex> lock(mutex);
+        const auto* words=boost::asio::buffer_cast<const uint32_t*>(buffer);
+        for (size_t i=0;i<8;i++) response[i]=uhd::ntohx(words[i]);
+        const auto op=response[2];
+        operations.push_back(op);
+        if (op==1) response[4]=1, response[5]=2;
+        if (op==2 && (response[4]!=1 || response[5]!=2)) throw std::runtime_error("wrong token");
+        response[6]=(op==1 && busy)?1:(op==2 && reject_renew)?2:0;
+        response[7]=3000;
+        for (auto& word:response) word=uhd::htonx(word);
+        pending=true;
+        return buffer.size();
+    }
+    size_t recv(const boost::asio::mutable_buffer& buffer,double) override {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!pending) return 0;
+        std::memcpy(boost::asio::buffer_cast<void*>(buffer),response,sizeof(response));
+        pending=false;
+        return sizeof(response);
+    }
+    std::string get_recv_addr() override { return "127.0.0.1"; }
+    std::string get_send_addr() override { return "127.0.0.1"; }
+    std::mutex mutex;
+    std::vector<uint32_t> operations;
+    uint32_t response[8]{};
+    bool pending=false,busy=false,reject_renew=false;
+};
+BOOST_AUTO_TEST_CASE(device_lease_renews_and_releases_after_host_teardown) {
+    auto transport=std::make_shared<lease_transport>();
+    {
+        ant_device_lease lease(transport,std::chrono::milliseconds(5));
+        for (unsigned i=0;i<100;i++) {
+            { std::lock_guard<std::mutex> lock(transport->mutex);
+              if(transport->operations.size()>1) break; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        lease.check();
+    }
+    BOOST_REQUIRE_GE(transport->operations.size(),3);
+    BOOST_CHECK_EQUAL(transport->operations.front(),1);
+    BOOST_CHECK_EQUAL(transport->operations[1],2);
+    BOOST_CHECK_EQUAL(transport->operations.back(),3);
+}
+BOOST_AUTO_TEST_CASE(device_lease_rejects_a_competing_host) {
+    auto transport=std::make_shared<lease_transport>(); transport->busy=true;
+    BOOST_CHECK_THROW(ant_device_lease lease(transport),uhd::runtime_error);
+    BOOST_REQUIRE_EQUAL(transport->operations.size(),1);
+}
+BOOST_AUTO_TEST_CASE(device_lease_does_not_reacquire_after_ownership_loss) {
+    auto transport=std::make_shared<lease_transport>(); transport->reject_renew=true;
+    {
+        ant_device_lease lease(transport,std::chrono::milliseconds(5));
+        bool lost=false;
+        for (unsigned i=0;i<100;i++) {
+            try { lease.check(); } catch(const uhd::runtime_error&) { lost=true; break; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        BOOST_CHECK(lost);
+    }
+    BOOST_REQUIRE_EQUAL(transport->operations.size(),3);
+    BOOST_CHECK_EQUAL(transport->operations[0],1);
+    BOOST_CHECK_EQUAL(transport->operations[1],2);
+    BOOST_CHECK_EQUAL(transport->operations[2],3);
+}
 
 using namespace uhd::transport;
 class observed_transport : public mock_zero_copy {

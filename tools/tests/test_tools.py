@@ -191,6 +191,24 @@ class ReleaseTest(unittest.TestCase):
         self.assertIsNone(status['confirmed_slot'])
         self.assertFalse(status['boot_storage_ready'])
 
+    def test_runtime_diagnostics_detect_stale_or_faulted_daemons(self):
+        class Connection:
+            report = {'updated_monotonic_ms': 19900, 'fault': '', 'uid': 65301}
+            def run(self, command, **kwargs):
+                if command == '/usr/sbin/antsdr-health --json':
+                    return '{"healthy":true,"uptime_seconds":20}'
+                if command == 'cat /run/antsdr-runtime/radio/status.json 2>/dev/null':
+                    return json.dumps(self.report)
+                return {'cat /proc/cmdline': 'antsdr.slot=root'}.get(command, '')
+        connection = Connection()
+        result = ops.health(connection)
+        self.assertTrue(result['healthy'])
+        self.assertFalse(result['runtime']['radio']['stale'])
+        connection.report = {**connection.report, 'updated_monotonic_ms': 10000}
+        self.assertFalse(ops.health(connection)['healthy'])
+        connection.report = {**connection.report, 'updated_monotonic_ms': 19900, 'fault': 'lease_readback_failed'}
+        self.assertFalse(ops.health(connection)['healthy'])
+
     def test_release_integrity_and_path_validation(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);info=release(root)

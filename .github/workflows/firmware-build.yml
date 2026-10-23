@@ -21,6 +21,8 @@ jobs:
         run: bash firmware/fpga/tests/run_ddc_phase.sh
       - name: Hardware receive trigger regression
         run: bash firmware/fpga/tests/run_rx_trigger.sh
+      - name: Device ownership and DDR queue regression
+        run: bash firmware/fpga/tests/run_lease.sh
       - name: Build and verify image
         env:
           BOARD: ${{ inputs.board }}

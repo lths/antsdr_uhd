@@ -32,11 +32,14 @@
 
 `default_nettype none
 module eth_ipv4_chdr64_dispatch #(
+  parameter REQUIRE_LEASE = 0,
   parameter [0:0] DROP_UNKNOWN_MAC = 1
 )(
   // Clocking and reset interface
   input  wire        clk,
   input  wire        rst,
+  input wire lease_active,
+  input wire [31:0] owner_ip,
   // Input 68bit AXI-Stream interface (from MAC)
   input  wire [63:0] s_mac_tdata,
   input  wire [3:0]  s_mac_tuser,
@@ -311,6 +314,15 @@ module eth_ipv4_chdr64_dispatch #(
             udp_src_port_cached <= bswap16(in_tdata[0 +: 16]);
             udp_dst_port_cached <= bswap16(in_tdata[16 +: 16]);
             if (in_tuser[3]) begin
+              state <= ST_DROP_PKT;
+              discard_cpu_pkt <= 1'b1;
+            end else if (REQUIRE_LEASE &&
+                (bswap16(in_tdata[16 +: 16]) == my_udp_chdr_port ||
+                 bswap16(in_tdata[16 +: 16]) == OFFLOAD_PORT1 ||
+                 bswap16(in_tdata[16 +: 16]) == OFFLOAD_PORT2 ||
+                 bswap16(in_tdata[16 +: 16]) == OFFLOAD_PORT3 ||
+                 bswap16(in_tdata[16 +: 16]) == OFFLOAD_PORT4) &&
+                (!lease_active || ipv4_src_addr_cached != owner_ip)) begin
               state <= ST_DROP_PKT;
               discard_cpu_pkt <= 1'b1;
             end else if (bswap16(in_tdata[16 +: 16]) == my_udp_chdr_port) begin

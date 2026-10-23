@@ -8,6 +8,7 @@
 #include "../../transport/super_recv_packet_handler.hpp"
 #include "../../transport/super_send_packet_handler.hpp"
 #include "ant_impl.hpp"
+#include "ant_lease.hpp"
 #include <chrono>
 #include "ant_regs.hpp"
 #include "uhd/utils/math.hpp"
@@ -399,6 +400,7 @@ boost::optional<uhd::msg_task::msg_type_t> ant_impl::handle_async_task(
  **********************************************************************/
 rx_streamer::sptr ant_impl::get_rx_stream(const uhd::stream_args_t& args_)
 {
+    if (_device_lease) _device_lease->check();
     std::lock_guard<std::mutex> lock(_transport_setup_mutex);
 
     stream_args_t args = args_;
@@ -634,6 +636,7 @@ void ant_impl::handle_overflow(const size_t radio_index)
  **********************************************************************/
 tx_streamer::sptr ant_impl::get_tx_stream(const uhd::stream_args_t& args_)
 {
+    if (_device_lease) _device_lease->check();
     std::lock_guard<std::mutex> lock(_transport_setup_mutex);
 
     stream_args_t args = args_;

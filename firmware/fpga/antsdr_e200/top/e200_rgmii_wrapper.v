@@ -58,6 +58,8 @@ module e200_rgmii_wrapper #(
   // Resets
   input         areset,
   input         bus_rst,
+  output        lease_active,
+  output [31:0] session_epoch,
   input         clk200,
 
   // Clocks
@@ -370,6 +372,7 @@ module e200_rgmii_wrapper #(
     
     eth_interface #(
       .PROTOVER   (RFNOC_PROTOVER),
+      .REQUIRE_LEASE(1),
       .MTU        (10),
       .NODE_INST  (0),
       .REG_AWIDTH (AWIDTH),
@@ -377,6 +380,8 @@ module e200_rgmii_wrapper #(
     ) eth_interface (
       .clk           (bus_clk),
       .reset         (bus_rst),
+      .lease_active  (lease_active),
+      .session_epoch (session_epoch),
       .device_id     (device_id),
       .reg_wr_req    (reg_wr_req),
       .reg_wr_addr   (reg_wr_addr),

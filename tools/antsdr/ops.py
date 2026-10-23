@@ -204,9 +204,24 @@ def health(connection):
         supervision = json.loads(cached)
         for field in ('restarts', 'consecutive_failures', 'recovery_limited'):
             current[field] = supervision[field]
+    runtime = {}
+    for role in ('radio', 'network'):
+        raw = connection.run(f'cat /run/antsdr-runtime/{role}/status.json 2>/dev/null', check=False)
+        if raw:
+            try:
+                report = json.loads(raw)
+                age = current.get('uptime_seconds', 0) * 1000 - report['updated_monotonic_ms']
+                report['stale'] = age > 5000 or age < -5000
+                if report['stale'] or report.get('fault'):
+                    current['healthy'] = False
+                runtime[role] = report
+            except (ValueError, KeyError, TypeError):
+                runtime[role] = {'fault': 'invalid_diagnostics', 'stale': True}
+                current['healthy'] = False
+    current['runtime'] = runtime
     stats = connection.run('ethtool -S eth0 2>/dev/null', check=False)
     current['hardware_counters'] = {key:int(value) for key,value in re.findall(r'^\s+([A-Za-z0-9_]+): (\d+)\s*$', stats, re.M)}
-    current['recent_events'] = connection.run("{ logread 2>/dev/null || cat /var/log/messages 2>/dev/null; } | grep -E 'antsdr-health|antsdr-boot' | tail -20", check=False).splitlines()
+    current['recent_events'] = connection.run("{ logread 2>/dev/null || cat /var/log/messages 2>/dev/null; } | grep -E 'antsdr-health|antsdr-boot|antsdr-runtime' | tail -20", check=False).splitlines()
     command_line = connection.run('cat /proc/cmdline')
     match = re.search(r'(?:^| )antsdr\.slot=(a|b|root)(?: |$)', command_line.strip())
     current['boot_slot'] = match[1] if match else 'legacy'

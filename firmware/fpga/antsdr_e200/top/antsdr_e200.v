@@ -150,6 +150,11 @@ module antsdr_e200 (
     // Resets
     wire global_rst;
     wire bus_rst;
+    wire lease_active;
+    wire [31:0] session_epoch;
+    wire lease_radio_rst;
+    reset_sync lease_reset_sync(.clk(radio_clk),
+        .reset_in(!lease_active), .reset_out(lease_radio_rst));
     wire reg_rstn;
     wire clk40_rst;
     wire clk40_rstn;
@@ -452,9 +457,9 @@ module antsdr_e200 (
        .tx_clk                  ( CAT_FBCLK_P       ),
        .tx_frame                ( CAT_TX_FR_P        ),
        .tx_data                 ( CAT_P1_D          ),
-       .tx_i0                   ( tx_data0[31:20]   ),
+       .tx_i0                   ( lease_radio_rst ? 12'd0 : tx_data0[31:20] ),
        .tx_q0                   ( tx_data0[15:4]    ),
-       .tx_i1                   ( tx_data1[31:20]   ),
+       .tx_i1                   ( lease_radio_rst ? 12'd0 : tx_data1[31:20] ),
        .tx_q1                   ( tx_data1[15:4]    ),
        .radio_rst               (                   ),
        .rx_stb                  (                   ),
@@ -505,7 +510,7 @@ module antsdr_e200 (
     // assign {tx_amp_en1, SFDX1_RX, SFDX1_TX, SRX1_RX, SRX1_TX, LED_RX1, LED_TXRX1_RX, LED_TXRX1_TX} = fe0_gpio;
     // assign {tx_amp_en2, SFDX2_RX, SFDX2_TX, SRX2_RX, SRX2_TX, LED_RX2, LED_TXRX2_RX, LED_TXRX2_TX} = fe1_gpio;
 
-    assign tx_amp_en1 = fe0_gpio[7];
+    assign tx_amp_en1 = lease_active && fe0_gpio[7];
    
  
     wire [31:0] misc_outs; reg [31:0] misc_outs_r;
@@ -531,13 +536,13 @@ module antsdr_e200 (
 
     b200_core #(.EXTRA_BUFF_SIZE(12)) b200_core
     (
-        .bus_clk(bus_clk), .bus_rst(bus_rst),
+        .bus_clk(bus_clk), .bus_rst(bus_rst | !lease_active),
         .tx_tdata(tx_tdata), .tx_tlast(tx_tlast), .tx_tvalid(tx_tvalid), .tx_tready(tx_tready),
         .rx_tdata(rx_tdata), .rx_tlast(rx_tlast),  .rx_tvalid(rx_tvalid), .rx_tready(rx_tready),
         .ctrl_tdata(ctrl_tdata), .ctrl_tlast(ctrl_tlast),  .ctrl_tvalid(ctrl_tvalid), .ctrl_tready(ctrl_tready),
         .resp_tdata(resp_tdata), .resp_tlast(resp_tlast),  .resp_tvalid(resp_tvalid), .resp_tready(resp_tready),
 
-        .radio_clk(radio_clk), .radio_rst(radio_rst),
+        .radio_clk(radio_clk), .radio_rst(radio_rst | lease_radio_rst),
         .rx0(rx_data0), .rx1(rx_data1),
         .tx0(tx_data0), .tx1(tx_data1),
         .fe0_gpio_out(radio0_gpio), .fe1_gpio_out(radio1_gpio),
@@ -556,12 +561,15 @@ module antsdr_e200 (
 
 
     eth_radio_stream_control#(
+        .REQUIRE_LEASE(1),
         .CHDR_W                  ( 64 ),
         .USER_W                  ( 16 ),
         .BYPASS_RX_DEEP_FIFO     ( 1  )
     )u_eth_radio_stream_control(
         .clk                     ( bus_clk                     ),
-        .rst                     ( bus_rst                     ),
+        .rst                     ( bus_rst ),
+        .session_active          (lease_active),
+        .session_epoch           (session_epoch),
         .e2v_tdata               ( e2v_tdata               ),
         .e2v_tuser               ( e2v_tuser               ),
         .e2v_tlast               ( e2v_tlast               ),
@@ -626,6 +634,8 @@ module antsdr_e200 (
         .AWIDTH(REG_AWIDTH),     // Width of the address bus
         .PORTNUM(SFP_PORTNUM)
     ) u_e200_rgmii_wrapper (
+        .lease_active(lease_active),
+        .session_epoch(session_epoch),
         .areset(bus_rst),
         .bus_rst(bus_rst),
         .bus_clk(bus_clk),

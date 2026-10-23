@@ -12,6 +12,7 @@
 #include <linux/of_net.h>
 #include <linux/of_platform.h>
 #include <linux/of_irq.h>
+#include <linux/mutex.h>
 #include <linux/skbuff.h>
 #include <linux/phy.h>
 #include <linux/mii.h>
@@ -193,6 +194,9 @@ struct nixge_tx_skb {
 };
 
 struct nixge_priv {
+	struct mutex antsdr_lock;
+	bool antsdr_group_added;
+	void __iomem *antsdr_dna;
 	struct net_device *ndev;
 	struct napi_struct napi;
 	struct device *dev;
@@ -1729,6 +1733,8 @@ static void dummy_char_cleanup_module(void)
     class_destroy(dummy_class);
 }
 
+#include "antsdr_mgmt.h"
+
 static int nixge_probe(struct platform_device *pdev)
 {
 	struct device_node *mn, *phy_node;
@@ -1844,6 +1850,8 @@ static int nixge_probe(struct platform_device *pdev)
 		goto free_phy;
 	}
 
+	err = antsdr_management_init(pdev);
+	if (err) netdev_err(ndev, "ANTSDR management disabled: incompatible FPGA or DNA (%d)\n", err);
 	return 0;
 
 free_phy:
@@ -1866,6 +1874,8 @@ static int nixge_remove(struct platform_device *pdev)
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct nixge_priv *priv = netdev_priv(ndev);
 
+	if (priv->antsdr_group_added)
+		sysfs_remove_group(&pdev->dev.kobj, &antsdr_group);
 	unregister_netdev(ndev);
 	dummy_char_cleanup_module();
 	if (priv->is_fixed_link)

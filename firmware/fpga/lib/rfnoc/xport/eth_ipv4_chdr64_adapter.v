@@ -37,6 +37,7 @@
 
 `default_nettype none
 module eth_ipv4_chdr64_adapter #(
+  parameter REQUIRE_LEASE = 0,
   parameter [15:0] PROTOVER         = {8'd1, 8'd0},
   parameter        MTU              = 10,
   parameter        CPU_FIFO_SIZE    = MTU,
@@ -48,6 +49,8 @@ module eth_ipv4_chdr64_adapter #(
   // Clocking and reset interface
   input  wire        clk,
   input  wire        rst,
+  input wire lease_active,
+  input wire [31:0] owner_ip,
   // Device info
   input  wire [15:0] device_id,
   // AXI-Stream interface to/from MAC
@@ -123,9 +126,12 @@ module eth_ipv4_chdr64_adapter #(
   // Ethernet sink. Inspects packet and dispatches
   // to the correct port.
   eth_ipv4_chdr64_dispatch #(
+    .REQUIRE_LEASE(REQUIRE_LEASE),
     .DROP_UNKNOWN_MAC(DROP_UNKNOWN_MAC)
   ) eth_dispatch_i (
     .clk              (clk),
+    .lease_active(lease_active),
+    .owner_ip(owner_ip),
     .rst              (rst),
     .s_mac_tdata      (s_mac_tdata),
     .s_mac_tuser      (s_mac_tuser),

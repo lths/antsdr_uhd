@@ -28,6 +28,18 @@
 		reg = <0x0 0x20000000>;
 	};
 
+	/* The FPGA TX queue owns this 64 MiB DDR window. Linux must never
+	 * allocate it, including while the radio is unleased or the queue drains. */
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+		radio-tx@18000000 {
+			reg = <0x18000000 0x04000000>;
+			no-map;
+		};
+	};
+
 	chosen {
 		stdout-path = "serial0:115200n8";
 	};
@@ -114,7 +126,8 @@
 
 	nixge0: ethernet@40000000 {
 		compatible = "ni,xge-enet-2.00";
-		reg = <0x40000000 0x8000>; //FIXME
+		reg = <0x40000000 0x8000>, <0x43c00000 0x1000>;
+		reg-names = "nic", "dna";
 
 		clocks = <&clkc 15>;
 		clock-names = "bus_clk";

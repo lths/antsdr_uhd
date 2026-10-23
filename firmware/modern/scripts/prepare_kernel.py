@@ -31,7 +31,7 @@ text = text.replace('\n\treturn 0;\n}\n\nstatic struct platform_driver nixge_dri
 # The source replacement does not need the legacy, unbounded char-device ABI.
 # Omit it from the modern driver, rather than exposing it to local processes.
 start = text.index('static int dummy_open(')
-end = text.index('static int nixge_probe(', start)
+end = text.index('#include "antsdr_mgmt.h"', start)
 text = text[:start] + text[end:]
 text = text.replace('dummy_char_cleanup_module();', '')
 text = text.replace('dummy_char_init_module();', '')
@@ -44,3 +44,5 @@ text = text.replace('static unsigned int major; /* major number for device */', 
 text = text.replace('struct device *cdev;', '')
 (source / 'drivers/net/ethernet/ni/nixge.c').write_text(text)
 (source / 'arch/arm/boot/dts/xilinx/zynq-e200.dts').write_text((firmware / 'modern/board/zynq-e200.dts').read_text())
+
+(source / "drivers/net/ethernet/ni/antsdr_mgmt.h").write_text((firmware / "linux/drivers/net/ethernet/ni/antsdr_mgmt.h").read_text())

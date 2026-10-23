@@ -114,7 +114,8 @@
 
 	nixge0: ethernet@40000000 {
 		compatible = "ni,xge-enet-2.00";
-		reg = <0x40000000 0x8000>; //FIXME
+		reg = <0x40000000 0x8000>, <0x43c00000 0x1000>;
+		reg-names = "nic", "dna";
 
 		clocks = <&clkc 15>;
 		clock-names = "bus_clk";

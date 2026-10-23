@@ -44,6 +44,7 @@
 // --------------------------------------------------------------------------------
 // --------------------------------------------------------------------------------
 module eth_radio_stream_control #(
+    parameter REQUIRE_LEASE = 0,
     parameter CHDR_W = 64,
     parameter USER_W = 16,
     parameter BYPASS_RX_DEEP_FIFO = 0
@@ -57,6 +58,9 @@ module eth_radio_stream_control #(
     input   wire            e2v_tlast   ,
     input   wire            e2v_tvalid  ,
     output  wire            e2v_tready  ,
+
+    input wire session_active,
+    input wire [31:0] session_epoch,
 
     // control stream
     output  wire    [63:0]  ctrl_tdata  ,  
@@ -135,7 +139,7 @@ module eth_radio_stream_control #(
         .USER_W        ( USER_W )
     )u_chdr_trim_payload(
         .clk           ( clk           ),
-        .rst           ( rst           ),
+        .rst           ( rst | (REQUIRE_LEASE && !session_active) ),
 
         .s_axis_tdata  ( e2v_tdata     ),
         .s_axis_tuser  ( e2v_tuser     ),
@@ -151,13 +155,15 @@ module eth_radio_stream_control #(
     );
 
 
+    wire [63:0] split_data;
+    wire split_valid, split_ready, split_last;
     stream_split#(
         .CHDR_W    ( CHDR_W ),
         .USER_W    ( USER_W ),
         .BUFFER    ( 1 )
     )u_stream_split(
         .clk       ( clk            ),
-        .reset     ( rst            ),
+        .reset     ( rst | (REQUIRE_LEASE && !session_active) ),
         .clear     ( 1'b0           ),
 
         .i_tdata   ( v2d_tdata      ),
@@ -171,14 +177,25 @@ module eth_radio_stream_control #(
         .o0_tvalid ( ctrl_tvalid    ),
         .o0_tready ( ctrl_tready    ),
 
-        .o1_tdata  ( h2c_fifo_pre_tdata       ),
-        .o1_tlast  (                          ),
-        .o1_tvalid ( h2c_fifo_pre_tvalid      ),
-        .o1_tready ( h2c_fifo_pre_tready      )
+        .o1_tdata  ( split_data       ),
+        .o1_tlast  ( split_last ),
+        .o1_tvalid ( split_valid ),
+        .o1_tready ( split_ready )
         
     );
 
 
+    generate if (REQUIRE_LEASE) begin
+      antsdr_session_queue queue_guard (
+        .clk(clk), .reset(rst), .active(session_active), .epoch(session_epoch),
+        .in_data(split_data), .in_last(split_last), .in_valid(split_valid), .in_ready(split_ready),
+        .pre_data(h2c_fifo_pre_tdata), .pre_valid(h2c_fifo_pre_tvalid), .pre_ready(h2c_fifo_pre_tready),
+        .post_data(h2c_fifo_post_tdata), .post_valid(h2c_fifo_post_tvalid), .post_ready(h2c_fifo_post_tready),
+        .out_data(tx_tdata), .out_last(tx_tlast), .out_valid(tx_tvalid), .out_ready(tx_tready));
+    end else begin
+      assign h2c_fifo_pre_tdata = split_data;
+      assign h2c_fifo_pre_tvalid = split_valid;
+      assign split_ready = h2c_fifo_pre_tready;
     deep_fifo_to_radio u_deep_fifo_to_radio(
         .clk                     ( clk                     ),
         .rst                     ( rst                     ),
@@ -192,6 +209,8 @@ module eth_radio_stream_control #(
         .tx_tvalid               ( tx_tvalid               ),
         .tx_tready               ( tx_tready               )
     );
+    end endgenerate
+
 
 
 generate
@@ -232,7 +251,7 @@ endgenerate
         .BUFFER    ( 1 )
     )u_stream_aggregation(
         .clk       ( clk       ),
-        .reset     ( rst      ),
+        .reset     ( rst | (REQUIRE_LEASE && !session_active) ),
         .clear     ( 1'b0     ),
         .i0_tdata  ( resp_tdata  ),
         .i0_tlast  ( resp_tlast  ),
@@ -253,4 +272,80 @@ endgenerate
 
 
     
+endmodule
+// Store one complete TX packet before entering the DDR queue. A private prefix
+// carries its session epoch and exact length. Queue state is never reset on
+// lease expiry: old packets drain, even across stalls and partial writes, while
+// their samples are suppressed. No DDR/AXI reset is required for a handover.
+module antsdr_session_queue (
+  input clk, reset, active,
+  input [31:0] epoch,
+  input [63:0] in_data,
+  input in_last, in_valid,
+  output in_ready,
+  output [63:0] pre_data,
+  output pre_valid,
+  input pre_ready,
+  input [63:0] post_data,
+  input post_valid,
+  output post_ready,
+  output [63:0] out_data,
+  output out_last, out_valid,
+  input out_ready
+);
+  reg [63:0] packet [0:255];
+  reg [8:0] received, length, sent;
+  reg [31:0] packet_epoch;
+  reg [1:0] writer;
+  localparam COLLECT=0, PREFIX=1, BODY=2, DISCARD=3;
+  assign in_ready = writer == COLLECT || writer == DISCARD;
+  assign pre_valid = writer == PREFIX || writer == BODY;
+  assign pre_data = writer == PREFIX ? {16'h4c51, {7'd0,length}, packet_epoch} : packet[sent[7:0]];
+  wire [2:0] packet_type = {in_data[63:62],in_data[60]};
+  wire header_valid = (in_data[31:0] == 32'h50 || in_data[31:0] == 32'h60) &&
+      (packet_type == 0 || packet_type == 1 || packet_type == 2);
+  always @(posedge clk) begin
+    if (reset) begin writer<=COLLECT; received<=0; length<=0; sent<=0; packet_epoch<=0; end
+    else begin
+      case (writer)
+        COLLECT: begin
+          if (!active) received<=0;
+          else if (in_valid && in_ready) begin
+            packet[received[7:0]]<=in_data;
+            if (received == 0) packet_epoch<=epoch;
+            if (received == 0 && !header_valid) begin
+              received<=0; writer<=in_last?COLLECT:DISCARD;
+            end else if (in_last) begin length<=received+1; received<=0; writer<=PREFIX; end
+            else if (received == 255) begin received<=0; writer<=DISCARD; end
+            else received<=received+1;
+          end
+        end
+        DISCARD: if (!active || (in_valid && in_last)) writer<=COLLECT;
+        PREFIX: if (pre_ready) begin sent<=0; writer<=BODY; end
+        BODY: if (pre_ready) begin
+          if (sent == length-1) begin writer<=COLLECT; received<=0; end
+          else sent<=sent+1;
+        end
+      endcase
+    end
+  end
+  reg [15:0] remaining;
+  reg [31:0] queued_epoch;
+  reg queue_fault;
+  wire permitted = active && queued_epoch == epoch && !queue_fault;
+  assign post_ready = remaining == 0 || !permitted || out_ready;
+  assign out_data = post_data;
+  assign out_valid = post_valid && remaining != 0 && permitted;
+  assign out_last = remaining == 1;
+  always @(posedge clk) begin
+    if (reset) begin remaining<=0; queued_epoch<=0; queue_fault<=0; end
+    else if (post_valid && post_ready) begin
+      if (remaining == 0) begin
+        // Internal queue corruption fails closed until a global reset.
+        if (post_data[63:48] != 16'h4c51 || post_data[47:32] == 0 || post_data[47:32] > 256)
+          queue_fault<=1;
+        remaining<=post_data[47:32]; queued_epoch<=post_data[31:0];
+      end else remaining<=remaining-1;
+    end
+  end
 endmodule

@@ -91,6 +91,7 @@ typedef struct {
 } microphase_ant_ctrl_data_t;
 
 class ant_device_process_lock;
+class ant_device_lease;
 
 static const uint8_t ANT_FW_COMPAT_NUM_MAJOR = 8;
 static const uint8_t ANT_FW_COMPAT_NUM_MINOR = 0;
@@ -165,6 +166,7 @@ private:
     // Held for the complete lifetime of this device object. Declared before
     // transports/controllers so it is released only after they are destroyed.
     std::unique_ptr<ant_device_process_lock> _device_process_lock;
+    std::unique_ptr<ant_device_lease> _device_lease;
 
     // controllers
     radio_ctrl_core_3000::sptr _local_ctrl;
