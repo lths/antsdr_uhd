@@ -459,6 +459,14 @@ rx_streamer::sptr ant_impl::get_rx_stream(const uhd::stream_args_t& args_)
         id.num_outputs   = 1;
         my_streamer->set_converter(id);
 
+        // E200 source flow control can retain packets after the previous
+        // receiver stops reading. Drain them before set_sid() resets the FPGA
+        // sequence counter and before installing/flushing the host receiver.
+        // Draining afterwards releases stale samples into the new session and
+        // advances its sequence counter before the first requested sample.
+        if (_antsdr_product == antsdr_product_t::E200) {
+            perif.framer->configure_flow_control(ANT_RX_FC_WINDOW_PACKETS);
+        }
         perif.framer->clear();
         perif.framer->set_nsamps_per_packet(spp);
         perif.framer->set_sid(sid);
@@ -485,7 +493,6 @@ rx_streamer::sptr ant_impl::get_rx_stream(const uhd::stream_args_t& args_)
         // FPGA configuration and must not receive these packets. Ettus E3XX
         // devices are handled by the separate upstream e3xx driver.
         if (_antsdr_product == antsdr_product_t::E200) {
-            perif.framer->configure_flow_control(ANT_RX_FC_WINDOW_PACKETS);
             boost::shared_ptr<rx_fc_cache_t> fc_cache(new rx_fc_cache_t(
                 _ctrl_transport, radio_index == 0 ? ANT_RX_FC0_SID : ANT_RX_FC1_SID));
             my_streamer->set_xport_handle_flowctrl(stream_i,

@@ -60,10 +60,18 @@ A finite 50 ms burst at 902.1 MHz, with minimum hardware TX gain and digitally
 attenuated samples, produced a 12.0 dB received tone rise and 14.6 dB fall with
 no stream errors or clipping. TX and RX antennas were about 12 inches apart.
 This checks basic TX/RX operation; it does not establish calibrated power,
-absolute frequency accuracy, or antenna isolation. A subsequent receive session
-reported an overflow at its first sample. Repeated starts after duplex use
-remain under investigation; the successful fresh-boot burst does not qualify
-that sequence.
+absolute frequency accuracy, or antenna isolation.
+
+A subsequent receive session exposed a host-driver startup ordering bug. Resetting
+E200 source flow control after the host buffer flush released old packets into
+the new capture, causing an initial sequence error and stale timestamps. The
+driver now drains flow-controlled data before resetting the FPGA sequence
+counter and flushing the new receiver. Packet loss detection remains enabled.
+The failure was reproduced without transmitting; six deliberate backlog/restart
+cases passed with the fix, including single/dual receive and 1, 5 and 10 MS/s
+settings. Three consecutive 50 ms bursts at 902.1 MHz, each followed by a clean
+receive-only capture, passed without rebooting. This fix requires rebuilding
+the host driver; the installed `dfe9da66b` SD firmware was retained.
 
 Fresh-card testing also found that failed host SSH setup could leave open
 unauthenticated connections. The host tool now closes connections when setup

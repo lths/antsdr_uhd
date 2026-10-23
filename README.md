@@ -150,6 +150,11 @@ handler C++ tests. With Vivado 2019.1 installed, run the FPGA phase regression:
 XILINX_ROOT=/path/to/Xilinx bash firmware/fpga/tests/run_ddc_phase.sh
 ```
 
+The [operations guide](tools/README.md#tests-and-ci) also documents a manual
+E200 receive restart regression. It checks that a new capture rejects stale
+data after a previous stream exhausts its flow-control credits, including
+duplex streamer setup, without transmitting samples.
+
 It checks actual halfband simulation models after asymmetric receive histories.
 The licensed firmware workflow runs this simulation before building an image. [CI](https://github.com/lths/antsdr_uhd/actions/workflows/tests.yml)
 runs firmware and host regression checks on pushes and pull requests. The manual

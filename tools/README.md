@@ -164,6 +164,25 @@ PYTHONPATH=tools python3 -m unittest discover -s tools/tests -v
 docker run --rm -v "$PWD:/work" antsdr-host:22.04 bash host/docker/build.sh
 ```
 
+With an E200 attached and no active radio capture, run the manual restart
+regression from the repository root:
+
+```sh
+docker run --rm --network host \
+    --mount "type=bind,source=$PWD,target=/work" antsdr-host:22.04 \
+    python3 host/tests/ant_rx_restart.py --iterations 6 \
+    --report firmware/build/validation/rx-restart.json
+```
+
+This deliberately leaves receive data unread, then checks that the next session
+starts at the requested device time without metadata errors or stale samples.
+It exercises both receive-only and duplex streamer setup, but sends no TX
+samples. Choose a new report path for each run. The E200 driver drains the old
+flow-control backlog before resetting its sequence counter and flushing host
+buffers; real packet sequence errors still fail the test. After rebuilding the
+host driver, restart applications such as the dashboard to load it. An SD-card
+firmware update is not required for this driver fix.
+
 GitHub Actions runs hardware-free firmware tests and the host build/tool tests.
 The manually dispatched firmware workflow requires a trusted self-hosted runner
 labelled `antsdr-xilinx-2019.1` with the licensed tools already installed. Neither
