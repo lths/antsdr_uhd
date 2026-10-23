@@ -78,6 +78,20 @@ BOOST_AUTO_TEST_CASE(device_lease_does_not_reacquire_after_ownership_loss) {
     BOOST_CHECK_EQUAL(transport->operations[1],2);
     BOOST_CHECK_EQUAL(transport->operations[2],3);
 }
+BOOST_AUTO_TEST_CASE(device_lease_survives_until_the_last_control_transport) {
+    auto udp=std::make_shared<lease_transport>();
+    auto lease=std::make_shared<ant_device_lease>(udp,std::chrono::seconds(10));
+    std::weak_ptr<ant_device_lease> observed=lease;
+    auto inner=std::make_shared<mock_zero_copy>(uhd::transport::vrt::if_packet_info_t::LINK_TYPE_CHDR);
+    auto transport=std::make_shared<ant_leased_transport>(lease,inner);
+    lease.reset();
+    BOOST_CHECK(!observed.expired());
+    BOOST_CHECK_EQUAL(udp->operations.size(),1);
+    transport.reset();
+    BOOST_CHECK(observed.expired());
+    BOOST_REQUIRE_EQUAL(udp->operations.size(),2);
+    BOOST_CHECK_EQUAL(udp->operations.back(),3);
+}
 
 using namespace uhd::transport;
 class observed_transport : public mock_zero_copy {

@@ -2,6 +2,7 @@
 #pragma once
 #include <uhd/exception.hpp>
 #include <uhd/transport/udp_simple.hpp>
+#include <uhd/transport/zero_copy.hpp>
 #include <uhd/utils/byteswap.hpp>
 #include <uhd/utils/log.hpp>
 #include <atomic>
@@ -96,4 +97,24 @@ private:
     std::condition_variable _stop;
     bool _stopping = false;
     std::thread _thread;
+};
+
+// Property-tree subscribers can retain radio controllers after ant_impl's
+// members are destroyed. Keep ownership attached to their actual RPC transport
+// so their final acknowledgement still happens before the device is released.
+class ant_leased_transport : public uhd::transport::zero_copy_if {
+public:
+    ant_leased_transport(std::shared_ptr<ant_device_lease> lease, sptr transport)
+        : _lease(std::move(lease)), _transport(std::move(transport)) {}
+    uhd::transport::managed_recv_buffer::sptr get_recv_buff(double timeout) override
+    { return _transport->get_recv_buff(timeout); }
+    uhd::transport::managed_send_buffer::sptr get_send_buff(double timeout) override
+    { _lease->check(); return _transport->get_send_buff(timeout); }
+    size_t get_num_recv_frames() const override { return _transport->get_num_recv_frames(); }
+    size_t get_recv_frame_size() const override { return _transport->get_recv_frame_size(); }
+    size_t get_num_send_frames() const override { return _transport->get_num_send_frames(); }
+    size_t get_send_frame_size() const override { return _transport->get_send_frame_size(); }
+private:
+    std::shared_ptr<ant_device_lease> _lease;
+    sptr _transport;
 };

@@ -498,6 +498,9 @@ ant_impl::ant_impl(const uhd::device_addr_t &device_addr)
         _ctrl_transport = udp_zero_copy::make(
                 addr, BOOST_STRINGIZE(MICROPHASE_ANT_UDP_CTRL_PORT), default_buff_args, ignored_params,
                 filtered_hints);
+        if (_device_lease) {
+            _ctrl_transport = std::make_shared<ant_leased_transport>(_device_lease, _ctrl_transport);
+        }
         while (_ctrl_transport->get_recv_buff(0.0)) {
         } // flush ctrl xport
 
@@ -569,6 +572,7 @@ ant_impl::ant_impl(const uhd::device_addr_t &device_addr)
         _data_rx_transport = udp_zero_copy::make(
                 addr, BOOST_STRINGIZE(MICROPHASE_ANT_UDP_DATA_RX_PORT), default_buff_args,
                 ignored_out_params, fi_hints);
+        if (_device_lease) _data_rx_transport = std::make_shared<ant_leased_transport>(_device_lease, _data_rx_transport);
         if (_data_rx_transport.get()) {
             _program_dispatcher(*_data_rx_transport);
         }
@@ -579,11 +583,13 @@ ant_impl::ant_impl(const uhd::device_addr_t &device_addr)
         _data_tx_transport = udp_zero_copy::make(
                 addr, BOOST_STRINGIZE(MICROPHASE_ANT_UDP_DATA_TX_PORT), default_buff_args,
                 ignored_out_params, fi_hints);
+        if (_device_lease) _data_tx_transport = std::make_shared<ant_leased_transport>(_device_lease, _data_tx_transport);
         while (_data_tx_transport->get_recv_buff(0.0)) {
         }
         _data_tx1_transport = udp_zero_copy::make(
                 addr, BOOST_STRINGIZE(MICROPHASE_ANT_UDP_DATA_TX1_PORT), default_buff_args,
                 ignored_out_params, fi_hints);
+        if (_device_lease) _data_tx1_transport = std::make_shared<ant_leased_transport>(_device_lease, _data_tx1_transport);
         while (_data_tx1_transport->get_recv_buff(0.0)) {
         }
 

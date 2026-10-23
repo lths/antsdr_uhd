@@ -166,7 +166,7 @@ private:
     // Held for the complete lifetime of this device object. Declared before
     // transports/controllers so it is released only after they are destroyed.
     std::unique_ptr<ant_device_process_lock> _device_process_lock;
-    std::unique_ptr<ant_device_lease> _device_lease;
+    std::shared_ptr<ant_device_lease> _device_lease;
 
     // controllers
     radio_ctrl_core_3000::sptr _local_ctrl;
