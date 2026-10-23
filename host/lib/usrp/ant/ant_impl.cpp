@@ -1252,10 +1252,15 @@ void ant_impl::update_time_source(const std::string& source)
 
 void ant_impl::set_time(const uhd::time_spec_t& t)
 {
-    for (radio_perifs_t& perif : _radio_perifs)
+    for (radio_perifs_t& perif : _radio_perifs) {
         perif.time64->set_time_sync(t);
+        // Writes are queued independently for each radio and the local core.
+        // Read back to acknowledge arming before pulsing the shared sync line.
+        perif.time64->get_time_now();
+    }
     _local_ctrl->poke32(TOREG(SR_CORE_SYNC), 1 << 2 | uint32_t(_time_source));
     _local_ctrl->poke32(TOREG(SR_CORE_SYNC), _time_source);
+    _local_ctrl->peek32(RB32_CORE_STATUS);
 }
 
 void ant_impl::sync_times()

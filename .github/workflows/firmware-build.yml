@@ -17,6 +17,8 @@ jobs:
     runs-on: [self-hosted, linux, antsdr-xilinx-2019.1]
     steps:
       - uses: actions/checkout@v4
+      - name: Receive decimator phase regression
+        run: bash firmware/fpga/tests/run_ddc_phase.sh
       - name: Build and verify image
         env:
           BOARD: ${{ inputs.board }}

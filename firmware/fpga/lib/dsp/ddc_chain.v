@@ -164,10 +164,15 @@ module ddc_chain
 	 assign nd1 = strobe_cic;
 	 assign nd2 = strobe_hb1;
 
+         // Reset decimation phase while idle. Independent RX sessions can leave
+         // the two filters on different halfband phases, so a later timed MIMO
+         // start otherwise produces permanently offset packet timestamps.
+         wire hb_clear = rst | clr | ~run;
+
 	 // Default Coeffs have gain of ~1.0
 	 hbdec1 hbdec1
 	   (.clk(clk), // input clk
-	    .sclr(rst), // input sclr
+	    .sclr(hb_clear), // input sclr
 	    .ce(enable_hb1), // input ce
 	    .coef_ld(reload_go & reload_ld1), // input coef_ld
 	    .coef_we(reload_go & reload_we1), // input coef_we
@@ -184,7 +189,7 @@ module ddc_chain
 	 // Default Coeffs have gain of ~1.0
 	 hbdec2 hbdec2
 	   (.clk(clk), // input clk
-	    .sclr(rst), // input sclr
+	    .sclr(hb_clear), // input sclr
 	    .ce(enable_hb2), // input ce
 	    .coef_ld(reload_go & reload_ld2), // input coef_ld
 	    .coef_we(reload_go & reload_we2), // input coef_we
@@ -242,9 +247,9 @@ module ddc_chain
 	 wire [17:0] i_unscaled_clip, q_unscaled_clip;
 
 	 clip_reg #(.bits_in(19), .bits_out(18), .STROBED(1)) unscaled_clip_i
-	   (.clk(clk), .in(i_unscaled[18:0]), .strobe_in(strobe_unscaled), .out(i_unscaled_clip[17:0]), .strobe_out(strobe_unscaled_clip));
+	   (.clk(clk), .reset(rst), .in(i_unscaled[18:0]), .strobe_in(strobe_unscaled), .out(i_unscaled_clip[17:0]), .strobe_out(strobe_unscaled_clip));
 	 clip_reg #(.bits_in(19), .bits_out(18), .STROBED(1)) unscaled_clip_q
-	   (.clk(clk), .in(q_unscaled[18:0]), .strobe_in(strobe_unscaled), .out(q_unscaled_clip[17:0]), .strobe_out());
+	   (.clk(clk), .reset(rst), .in(q_unscaled[18:0]), .strobe_in(strobe_unscaled), .out(q_unscaled_clip[17:0]), .strobe_out());
 
 	 // Apply scaling gain to compensate for CORDIC and CIC gain adjustments so that signal swing over network transport has
 	 // optimal dynamic range.
@@ -279,9 +284,9 @@ module ddc_chain
 	 always @(posedge clk)  strobe_scaled <= strobe_unscaled_clip;
 
 	 clip_reg #(.bits_in(36), .bits_out(33), .STROBED(1)) clip_i
-	   (.clk(clk), .in(prod_i[35:0]), .strobe_in(strobe_scaled), .out(i_clip), .strobe_out(strobe_clip));
+	   (.clk(clk), .reset(rst), .in(prod_i[35:0]), .strobe_in(strobe_scaled), .out(i_clip), .strobe_out(strobe_clip));
 	 clip_reg #(.bits_in(36), .bits_out(33), .STROBED(1)) clip_q
-	   (.clk(clk), .in(prod_q[35:0]), .strobe_in(strobe_scaled), .out(q_clip), .strobe_out());
+	   (.clk(clk), .reset(rst), .in(prod_q[35:0]), .strobe_in(strobe_scaled), .out(q_clip), .strobe_out());
 
 	 round_sd #(.WIDTH_IN(33), .WIDTH_OUT(16)) round_i
 	   (.clk(clk), .reset(rst), .in(i_clip), .strobe_in(strobe_clip), .out(sample[31:16]), .strobe_out(strobe));
