@@ -57,10 +57,13 @@ module lease_tb;
     timeout(2); cycles(10); timeout(3); cycles(20);
     if (!active) $fatal(1,"renewal did not extend ownership");
     cycles(12); if (active || expired!=1) $fatal(1,"independent expiry");
+    timeout(3);
+    if (active || ms) $fatal(1,"late renewal reopened an expired session");
     write_owner(32'hc0a801dd); timeout(3);
     write_owner(32'hc0a801dc);
     if (active || epoch!=3) $fatal(1,"owner change must revoke and advance epoch");
     timeout(3); timeout(0); if (active) $fatal(1,"explicit revoke");
+    timeout(3); if (active || ms) $fatal(1,"renewal reopened a revoked session");
 
     // Normal packet passes byte-for-byte; prefixes never reach the radio.
     output_ready=1;

@@ -353,27 +353,36 @@ module antsdr_lease_watchdog #(parameter CLOCK_HZ=100000000) (
   output reg active
 );
   reg [11:0] ms;
+  reg grant_pending;
   localparam DIV_W=$clog2(CLOCK_HZ/1000);
   reg [DIV_W-1:0] divider;
   assign remaining_ms={20'd0,ms};
   always @(posedge clk) begin
     if (reset) begin
-      ms<=0; divider<=0; owner_ip<=0; active<=0;
+      ms<=0; divider<=0; owner_ip<=0; active<=0; grant_pending<=0;
       expired_count<=0; session_epoch<=0;
     end else begin
       if (divider == CLOCK_HZ/1000-1) begin
         divider<=0;
-        if (ms != 0) begin
+        if (ms != 0 && !set_owner && !set_timeout) begin
           ms<=ms-1;
           if (ms == 1) begin active<=0; expired_count<=expired_count+1; end
         end
       end else divider<=divider+1;
       if (set_owner) begin
-        owner_ip<=write_data; ms<=0; active<=0;
+        owner_ip<=write_data; ms<=0; active<=0; grant_pending<=write_data!=0;
         if (write_data != 0) session_epoch<=session_epoch+1;
       end else if (set_timeout) begin
-        ms<=write_data>3000?3000:write_data[11:0]; divider<=0;
-        active<=write_data!=0 && owner_ip!=0;
+        divider<=0; grant_pending<=0;
+        // A late renewal cannot resurrect a closed epoch, even if a PS
+        // read/check raced the hardware deadline. A new owner write is
+        // required to grant ownership again and advance the session epoch.
+        if (write_data==0 || (!active && !grant_pending)) begin
+          ms<=0; active<=0;
+        end else begin
+          ms<=write_data>3000?3000:write_data[11:0];
+          active<=owner_ip!=0;
+        end
       end
     end
   end
