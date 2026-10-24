@@ -120,6 +120,85 @@ radio owner. Stop ends the sample feed; queued samples may finish. Reports in
 events. Completion requires the FPGA burst acknowledgement; errors do not report
 success. The transmitter restores minimum gain after completion or cancellation.
 
+## AD9361 receiver tuning
+
+The Receiver tuning panel edits the selected profile through dedicated fields.
+Save receiver tuning before starting the next capture or spectrum session. Gain
+mode (`manual`, `slow`, `fast`), manual gain setting and antenna can differ by
+channel. Frequency, analog bandwidth, LO offset and DC/IQ tracking are shared.
+Existing profiles retain their previous defaults: manual gain, tracking enabled,
+zero LO offset, and the standard device filter. Updating a saved profile does
+not retune a running capture.
+
+```json
+{
+  "schema_version": 1,
+  "name": "dual-agc",
+  "frequency_hz": 902050000,
+  "sample_rate": 1000000,
+  "bandwidth_hz": 2000000,
+  "gain_db": 10,
+  "channels": [0, 1],
+  "antenna": "RX2",
+  "gain_mode": "slow",
+  "channel_settings": {"1": {"gain_mode": "manual", "gain_db": 23}},
+  "auto_dc_offset": true,
+  "auto_iq_balance": true,
+  "lo_offset_hz": 100000,
+  "settle_seconds": 0.05
+}
+```
+
+Manual gain and `gain_index` use the existing UHD driver's 0–76 gain-table-index
+scale. Hardware readback follows AGC changes; it is not a calibrated RF gain in
+dB. RSSI is relative dB, and temperature uses the driver's approximate sensor
+calibration. Absolute input power in dBm requires bench calibration. Fast AGC
+state 5 indicates locked gain. Overload fields are instantaneous hardware flags,
+not latched event counts. Sample clipping separately counts received complex
+samples with either I or Q at the sc16 full-scale boundary; it cannot diagnose
+every analog overload.
+
+LO offset separates the RF synthesizer frequency from the desired digital
+center frequency. The requested sample band plus offset must fit within the
+analog bandwidth. Setup waits up to two seconds for LO lock, then applies the
+selected settling delay. Controls and custom taps are applied after final MIMO
+clock setup. Telemetry uses the same owner in a background thread, rather than
+opening a competing radio session, and accompanies spectrum frames and capture
+reports. Hardware sensor reads release Python's GIL so receiving can continue.
+
+Inspect the actual filter chain, limits and telemetry without receiving or
+transmitting samples:
+
+```sh
+tools/run radio-info --profile dual-agc
+```
+
+The dashboard's Inspect radio and filters action performs the same exclusive
+configuration/inspection job. Advanced profiles may include `fir_taps`: 16–128
+signed int16 coefficients in multiples of 16, with exactly the active filter's
+tap count. The driver preserves its configured clock, interpolation/decimation
+and FIR gain. Both selected channels are checked before coefficients are
+written; readback must match. A new device session restores standard filters
+unless the profile requests custom taps. Filter coefficients can change gain
+and alias rejection; the inspector reports the active filters and their rates.
+
+These features require the rebuilt host driver and Python API; no SD or FPGA
+update is required. The connected E200's AD9361 variant was confirmed by its
+owner; the generic driver name and board EEPROM do not identify RF chip bins.
+Device-advertised limits do not establish sustained Ethernet throughput or RF
+performance outside the part's specifications.
+
+Run the receive-only hardware regression in the host container:
+
+```sh
+python3 host/tests/ant_receiver_controls.py \
+  --report firmware/build/validation/receiver-controls.json
+```
+
+Fastlock hopping, hybrid/pin-synchronized AGC, TDD state scheduling, arbitrary
+gain-table uploads, and a public recalibration API remain separate extensions.
+External LO and TX-monitor features also need board routing verification.
+
 ## Calibration and persistent settings
 
 Calibration records require a real measurement reference, timezone-bearing date,

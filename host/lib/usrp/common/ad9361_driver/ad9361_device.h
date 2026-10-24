@@ -18,6 +18,7 @@
 #include <tuple>
 #include <functional>
 #include <mutex>
+#include <string>
 
 namespace uhd { namespace usrp {
 
@@ -199,12 +200,13 @@ public:
     /* Get the current RX or TX frequency. */
     double get_freq(direction_t direction);
 
-    /* Set the gain of RX1, RX2, TX1, or TX2.
-     *
-     * Note that the 'value' passed to this function is the actual gain value,
-     * _not_ the gain index. This is the opposite of the eval software's GUI!
-     * Also note that the RX chains are done in terms of gain, and the TX chains
-     * are done in terms of attenuation. */
+    // Live status, including the gain table index while automatic gain is active.
+    int get_rx_status(chain_t chain, const std::string& name);
+    double get_bw_filter(direction_t direction);
+
+    /* Set the gain of RX1, RX2, TX1, or TX2. The legacy RX API uses the
+     * full-table index (0..76); it is not an absolute RF gain calibration.
+     * TX uses the UHD gain scale, converted to chip attenuation. */
     double set_gain(direction_t direction, chain_t chain, const double value);
 
     /* Make AD9361 output its test tone. */

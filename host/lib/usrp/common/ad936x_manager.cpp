@@ -224,6 +224,12 @@ public:
             subtree->create<sensor_value_t>("sensors/rssi").set_publisher([this, key]() {
                 return this->_codec_ctrl->get_rssi(key);
             });
+            for (const std::string name : {"gain_index", "agc_mode", "agc_state", "overload"}) {
+                subtree->create<sensor_value_t>("sensors/" + name)
+                    .set_publisher([this, key, name]() {
+                        return sensor_value_t(name, this->_codec_ctrl->get_rx_status(key, name), "");
+                    });
+            }
         }
 
         // Gains
@@ -235,6 +241,14 @@ public:
                 .set_coercer([this, key](const double gain) {
                     return this->_codec_ctrl->set_gain(key, gain);
                 });
+            if (dir == RX_DIRECTION) {
+                subtree->access<double>(uhd::fs_path("gains") / name / "value")
+                    .set_publisher([this, key]() {
+                        // Preserve the existing UHD gain scale (0..76), which
+                        // is the table index, rather than claiming calibrated RF gain.
+                        return double(this->_codec_ctrl->get_rx_status(key, "gain_index"));
+                    });
+            }
         }
 
         // FE Settings
@@ -245,6 +259,7 @@ public:
         // Analog Bandwidths
         subtree->create<double>("bandwidth/value")
             .set(DEFAULT_BANDWIDTH)
+            .set_publisher([this, key]() { return this->_codec_ctrl->get_bw_filter(key); })
             .set_coercer([this, key](double bw) { return set_bw_filter(key, bw); });
         subtree->create<meta_range_t>("bandwidth/range").set_publisher([key]() {
             return ad9361_ctrl::get_bw_filter_range();
@@ -264,11 +279,13 @@ public:
         if (dir == RX_DIRECTION) {
             subtree->create<bool>("dc_offset/enable")
                 .set(ad936x_manager::DEFAULT_AUTO_DC_OFFSET)
+                .set_publisher([this, key]() { return bool(this->_codec_ctrl->get_rx_status(key, "bb_dc_tracking")); })
                 .add_coerced_subscriber([this, key](const bool enable) {
                     this->_codec_ctrl->set_dc_offset_auto(key, enable);
                 });
             subtree->create<bool>("iq_balance/enable")
                 .set(ad936x_manager::DEFAULT_AUTO_IQ_BALANCE)
+                .set_publisher([this, key]() { return bool(this->_codec_ctrl->get_rx_status(key, "iq_tracking")); })
                 .add_coerced_subscriber([this, key](const bool enable) {
                     this->_codec_ctrl->set_iq_balance_auto(key, enable);
                 });
@@ -277,6 +294,7 @@ public:
             const std::list<std::string> mode_strings{"slow", "fast"};
             subtree->create<bool>("gain/agc/enable")
                 .set(DEFAULT_AGC_ENABLE)
+                .set_publisher([this, key]() { return this->_codec_ctrl->get_rx_status(key, "agc_mode") != 0; })
                 .add_coerced_subscriber([this, key](const bool enable) {
                     this->_codec_ctrl->set_agc(key, enable);
                 });

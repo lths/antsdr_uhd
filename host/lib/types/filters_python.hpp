@@ -46,6 +46,17 @@ void export_filters(py::module& m)
         .def("get_cutoff", &analog_filter_lp::get_cutoff)
         .def("get_rolloff", &analog_filter_lp::get_rolloff)
         .def("set_cutoff", &analog_filter_lp::set_cutoff);
+
+    using digital = uhd::digital_filter_base<int16_t>;
+    using fir = uhd::digital_filter_fir<int16_t>;
+    py::class_<digital, filter_info_base, std::shared_ptr<digital>>(m, "digital_filter_i16")
+        .def("get_input_rate", &digital::get_input_rate)
+        .def("get_output_rate", &digital::get_output_rate)
+        .def("get_interpolation", &digital::get_interpolation)
+        .def("get_decimation", &digital::get_decimation)
+        .def("get_taps", &digital::get_taps);
+    py::class_<fir, digital, std::shared_ptr<fir>>(m, "digital_filter_fir_i16")
+        .def("set_taps", &fir::set_taps);
 }
 
 #endif /* INCLUDED_UHD_FILTERS_PYTHON_HPP */

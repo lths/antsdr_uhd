@@ -93,6 +93,9 @@ public:
     //! set the gain for a particular gain element
     virtual double set_gain(const std::string& which, const double value) = 0;
 
+    virtual int get_rx_status(const std::string& which, const std::string& name) = 0;
+    virtual double get_bw_filter(const std::string& which) = 0;
+
     //! Enable or disable the AGC module
     virtual void set_agc(const std::string& which, bool enable) = 0;
 

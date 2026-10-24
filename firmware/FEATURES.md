@@ -28,6 +28,7 @@ minimum-gain 902.1 MHz bursts and simultaneous receive.
 - [x] Restricted NIC management API and separate unprivileged daemons
 - [x] Automatic EEPROM board-revision identification
 - [x] Device ownership leases with independent FPGA expiry and DDR session isolation
+- [x] AD9361 receiver tuning, per-channel AGC, live sensors and verified FIR tap loading (host driver/tools)
 
 Implementation details, operation commands and measured results are recorded
 below. FPGA-resident spectrum processing requires a
@@ -36,6 +37,18 @@ the host. The E200 discovery/network runtime is now built from source; E316
 retains the vendor daemon.
 
 ## Validation
+
+The AD9361 host extension passed an 11-case receive-only hardware matrix:
+independent manual gains, slow/fast and mixed-channel AGC, LO-offset tuning,
+independent DC/IQ toggles, zero FIR coefficients followed by default-filter
+restoration, and live telemetry at 5/10 MS/s. Captures completed without RX
+metadata errors or overflows. Fast AGC reached hardware state 5 (gain locked).
+Browser automation saved per-channel tuning, disabled manual gain fields during
+AGC, and completed radio/filter inspection. These changes require a rebuilt
+host driver/Python API; the existing E200 SD/FPGA image is compatible.
+Overload-bit decoding has register-model coverage; absolute RF calibration and
+controlled overload/AGC step-response measurements still require a reference
+source. See the [receiver tuning guide](../tools/README.md#ad9361-receiver-tuning).
 
 The combined E200 implementation has passed on-device checks for private SD
 settings, restored radio/network configuration, stable MAC and SSH host keys,

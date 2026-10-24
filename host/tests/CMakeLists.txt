@@ -169,6 +169,14 @@ endif()
 ###############################################################################
 # Now add all unit tests that require special linkage
 ###############################################################################
+if(ENABLE_ANT)
+    UHD_ADD_NONAPI_TEST(
+        TARGET ad9361_receiver_test.cpp
+        EXTRA_SOURCES ${CMAKE_SOURCE_DIR}/lib/usrp/common/ad9361_driver/ad9361_device.cpp
+        INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/lib/usrp/common/ad9361_driver
+    )
+endif()
+
 if(ENABLE_DPDK)
     find_package(DPDK)
     UHD_ADD_NONAPI_TEST(

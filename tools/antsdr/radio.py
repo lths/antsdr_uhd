@@ -7,6 +7,7 @@ import threading
 import time
 
 from .store import atomic_json, number, profile, utc
+from . import tuning
 
 
 def spectrum(samples, rate, frequency, bins=1024, level_correction_db=0):
@@ -76,44 +77,59 @@ class Receiver:
         self.trigger_mode = trigger_mode
         self.hardware_threshold_dbfs = hardware_threshold_dbfs
         self.calibration = calibration
+        self.device = self.stream = None
+        self.telemetry = None
+        try:
+            self._initialize(address)
+        except BaseException:
+            self.close()
+            raise
+
+    def _initialize(self, address):
+        uhd = self.uhd
+        settings = self.settings
         self.device = uhd.usrp.MultiUSRP('type=ant,addr='+address)
-        self.serial = self.device.get_usrp_rx_info(self.settings['channels'][0]).get('mboard_serial', '')
-        if calibration and calibration['device_serial'].upper() != self.serial.upper():
+        if any(c >= self.device.get_rx_num_channels() for c in settings['channels']):
+            raise ValueError('Requested channel is unavailable')
+        self.serial = self.device.get_usrp_rx_info(settings['channels'][0]).get('mboard_serial', '')
+        if self.calibration and self.calibration['device_serial'].upper() != self.serial.upper():
             raise ValueError('Calibration serial does not match the connected radio')
-        self.device.set_clock_source(self.settings.get('clock_source', 'internal'))
-        ppm = calibration['frequency_error_ppm'] if calibration else 0
-        tune = self.settings['frequency_hz']/(1+ppm/1e6)
-        for channel in self.settings['channels']:
-            if channel >= self.device.get_rx_num_channels():
-                raise ValueError('Requested channel is unavailable')
+        self.device.set_clock_source(settings.get('clock_source', 'internal'))
+        ppm = self.calibration['frequency_error_ppm'] if self.calibration else 0
+        tune = settings['frequency_hz']/(1+ppm/1e6)
+        for channel in settings['channels']:
             for value, bounds, field in (
-                    (tune, self.device.get_rx_freq_range(channel), 'frequency'),
-                    (self.settings['gain_db'], self.device.get_rx_gain_range(channel), 'gain'),
-                    (self.settings['bandwidth_hz'], self.device.get_rx_bandwidth_range(channel), 'bandwidth')):
+                    (tune + settings.get('lo_offset_hz', 0), self.device.get_rx_freq_range(channel), 'frequency'),
+                    (settings['bandwidth_hz'], self.device.get_rx_bandwidth_range(channel), 'bandwidth')):
                 if not bounds.start() <= value <= bounds.stop():
                     raise ValueError('{} exceeds the connected radio capabilities'.format(field))
-            self.device.set_rx_rate(self.settings['sample_rate'], channel)
-            self.device.set_rx_freq(uhd.types.TuneRequest(tune), channel)
-            self.device.set_rx_gain(self.settings['gain_db'], channel)
-            self.device.set_rx_bandwidth(self.settings['bandwidth_hz'], channel)
-            self.device.set_rx_antenna(self.settings.get('antenna', 'RX2'), channel)
-        self.rate = self.device.get_rx_rate(self.settings['channels'][0])
+            self.device.set_rx_rate(settings['sample_rate'], channel)
         stream_args = uhd.usrp.StreamArgs('fc32', 'sc16')
-        stream_args.channels = self.settings['channels']
-        if trigger_mode in ('fpga-level', 'external-edge'):
-            trigger_args = 'trigger=' + ('level' if trigger_mode == 'fpga-level' else 'external')
-            if trigger_mode == 'fpga-level':
-                trigger_args += ',trigger_level=' + str(max(1, round(32768*10**(hardware_threshold_dbfs/20))))
+        stream_args.channels = settings['channels']
+        if self.trigger_mode in ('fpga-level', 'external-edge'):
+            trigger_args = 'trigger=' + ('level' if self.trigger_mode == 'fpga-level' else 'external')
+            if self.trigger_mode == 'fpga-level':
+                trigger_args += ',trigger_level=' + str(max(1, round(32768*10**(self.hardware_threshold_dbfs/20))))
             stream_args.args = trigger_args
         self.stream = self.device.get_rx_stream(stream_args)
-        if len(self.settings['channels']) > 1:
-            # Final MIMO activation may change the clock. Synchronize only after
-            # the streamer has enabled both chains, before its timed start.
+        # MIMO setup may reconfigure the chip's clock and restore defaults.
+        # Apply RF controls and custom taps only after final stream activation.
+        tuning.configure(self.device, uhd, settings, tune)
+        self.rate = self.device.get_rx_rate(settings['channels'][0])
+        if any(self.device.get_rx_rate(c) != self.rate for c in settings['channels']):
+            raise ValueError('Selected channels have different actual sample rates')
+        if len(settings['channels']) > 1:
             self.device.set_time_now(uhd.types.TimeSpec(0.0))
         self.actual = [{'channel': c, 'frequency_hz': self.device.get_rx_freq(c),
                         'sample_rate': self.device.get_rx_rate(c),
                         'gain_db': self.device.get_rx_gain(c),
-                        'bandwidth_hz': self.device.get_rx_bandwidth(c)} for c in self.settings['channels']]
+                        'gain_mode': tuning.channel_settings(settings, c).get('gain_mode', 'manual'),
+                        'bandwidth_hz': self.device.get_rx_bandwidth(c)} for c in settings['channels']]
+
+    def describe(self):
+        return {'complete': True, 'requested': self.settings, 'actual': self.actual,
+                'capabilities': tuning.capabilities(self.device, self.settings['channels']),
+                'telemetry': tuning.telemetry(self.device, self.settings['channels'])}
 
     def close(self):
         self.stream = None
@@ -180,8 +196,19 @@ class Receiver:
         start = time.monotonic()
         finish = None
         last_frame = 0
+        clipped = [0 for _ in self.settings['channels']]
+        peaks = [0.0 for _ in self.settings['channels']]
+        monitor_stop = threading.Event()
+        def monitor():
+            while not monitor_stop.is_set():
+                self.telemetry = tuning.telemetry(self.device, self.settings['channels'])
+                monitor_stop.wait(1)
+        monitor_thread = None
         try:
             self.stream.issue_stream_cmd(start_cmd)
+            if any(list(self.device.get_rx_sensor_names(c)) for c in self.settings['channels']):
+                monitor_thread = threading.Thread(target=monitor, daemon=True)
+                monitor_thread.start()
             while not (cancel and cancel.is_set()):
                 if hardware_samples and report['saved_samples_per_channel'] >= hardware_samples:
                     break
@@ -210,6 +237,10 @@ class Receiver:
                     report['first_sample_device_time'] = metadata.time_spec.get_real_secs()
                 report['received_samples_per_channel'] += n
                 block = buffer[:, :n]
+                for i in range(len(clipped)):
+                    peak = np.maximum(np.abs(block[i].real), np.abs(block[i].imag))
+                    clipped[i] += int(np.count_nonzero(peak >= 32767/32768))
+                    peaks[i] = max(peaks[i], float(peak.max()))
                 accepted = trigger.accept(block, force=trigger_after_seconds is not None and elapsed >= trigger_after_seconds)
                 if trigger.fired and finish is None:
                     report['triggered'] = True
@@ -226,6 +257,10 @@ class Receiver:
                     frame = spectrum(block[0], self.rate, self.settings['frequency_hz'], bins,
                                      self.calibration['level_correction_db'] if self.calibration else 0)
                     frame['time_utc'] = utc()
+                    frame['telemetry'] = self.telemetry
+                    frame['signal'] = [{'channel': c, 'clipped_samples': clipped[i],
+                                        'peak_dbfs': 20*math.log10(max(peaks[i], 1e-12))}
+                                       for i, c in enumerate(self.settings['channels'])]
                     on_spectrum(frame)
                     last_frame = time.monotonic()
             report['complete'] = report['triggered'] and not (
@@ -240,12 +275,23 @@ class Receiver:
                 try:
                     self.stream.issue_stream_cmd(self.uhd.types.StreamCMD(self.uhd.types.StreamMode.stop_cont))
                 finally:
-                    if handles:
-                        handles.close()
+                    monitor_stop.set()
+                    try:
+                        if monitor_thread:
+                            monitor_thread.join(timeout=5)
+                            if monitor_thread.is_alive():
+                                raise RuntimeError('Receiver telemetry did not stop')
+                    finally:
+                        if handles:
+                            handles.close()
             except BaseException as error:
                 report.update(complete=False, error=str(error))
                 raise
             finally:
+                report['telemetry'] = self.telemetry
+                report['signal'] = [{'channel': c, 'clipped_samples': clipped[i],
+                                     'peak_dbfs': 20*math.log10(max(peaks[i], 1e-12))}
+                                    for i, c in enumerate(self.settings['channels'])]
                 report['cancelled'] = bool(cancel and cancel.is_set())
                 if report['cancelled']:
                     report['complete'] = False

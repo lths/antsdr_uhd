@@ -2275,6 +2275,32 @@ double ad9361_device_t::get_rssi(chain_t chain)
     return rssi;
 }
 
+int ad9361_device_t::get_rx_status(chain_t chain, const std::string& name)
+{
+    // ADI no-OS ad9361.h: REG_GAIN_RX1/2, REG_FAST_ATTACK_STATE and
+    // REG_OVRG_SIGS_RX1/2. These status registers also follow automatic gain.
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    UHD_ASSERT_THROW(chain == CHAIN_1 || chain == CHAIN_2);
+    const bool second = chain == CHAIN_2;
+    if (name == "gain_index")
+        return _io_iface->peek8(second ? 0x2b5 : 0x2b0) & 0x7f;
+    if (name == "agc_mode")
+        return (_io_iface->peek8(0x0fa) >> (second ? 2 : 0)) & 3;
+    if (name == "agc_state")
+        return (_io_iface->peek8(0x2b3) >> (second ? 4 : 0)) & 7;
+    if (name == "overload")
+        return _io_iface->peek8(second ? 0x2b9 : 0x2b8) & 0x7f;
+    if (name == "bb_dc_tracking") return bool(_io_iface->peek8(0x18b) & 0x20);
+    if (name == "iq_tracking") return bool(_io_iface->peek8(0x169) & 0x03);
+    throw uhd::value_error("Unknown AD9361 receiver status: " + name);
+}
+
+double ad9361_device_t::get_bw_filter(direction_t direction)
+{
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    return direction == RX ? _rx_analog_bw : _tx_analog_bw;
+}
+
 /*
  * Returns the reading of the internal temperature sensor.
  * One point calibration of the sensor was done according to datasheet
@@ -2413,6 +2439,10 @@ void ad9361_device_t::_setup_agc(chain_t chain, gain_mode_t gain_mode)
             /*load agc mode config*/
             _setup_gain_control(true);
         }
+        // Switching the last AGC channel to manual reloads shared registers,
+        // including both manual gains. Restore each user's saved setting.
+        set_gain(RX, CHAIN_1, _rx1_gain);
+        set_gain(RX, CHAIN_2, _rx2_gain);
     }
 }
 
@@ -2938,6 +2968,7 @@ void ad9361_device_t::_set_filter_fir(
 {
     digital_filter_fir<int16_t>::sptr fir =
         std::dynamic_pointer_cast<digital_filter_fir<int16_t>>(filter);
+    if (!fir) throw uhd::value_error("AD9361 FIR requires signed int16 FIR coefficients");
     // only write taps. Ignore everything else for now
     _set_fir_taps(direction, channel, fir->get_taps());
 }

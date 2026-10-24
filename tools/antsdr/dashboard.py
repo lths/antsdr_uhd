@@ -43,7 +43,7 @@ class Application:
         if set(request)-{'kind','profile','duration','threshold_dbfs','pretrigger_seconds','trigger_timeout','trigger_after_seconds','capture_name','trigger_mode','device_delay_seconds'}:
             raise ValueError('Unknown job field')
         kind = request.get('kind')
-        if kind not in ('spectrum', 'capture'):
+        if kind not in ('spectrum', 'capture', 'inspect'):
             raise ValueError('Unsupported receive job')
         settings = self.store.get('profiles', request['profile'])
         duration = number(request.get('duration', 10), 0.01, 3600, 'duration')
@@ -95,10 +95,12 @@ class Application:
                                         hardware_threshold_dbfs=threshold if trigger_mode == 'fpga-level' else None)
                     with self.lock:
                         self.state['job']['status'] = 'receiving'
-                    result = receiver.run(duration, output=output, threshold_dbfs=threshold if trigger_mode == 'host' else None,
+                    result = receiver.describe() if kind == 'inspect' else receiver.run(duration, output=output, threshold_dbfs=threshold if trigger_mode == 'host' else None,
                                           pretrigger_seconds=pretrigger, trigger_timeout=trigger_timeout,
                                           on_spectrum=frame, cancel=self.cancel, trigger_after_seconds=trigger_after,
                                           device_delay_seconds=device_delay)
+                    receiver.close()
+                    receiver = None
                     with self.lock:
                         self.state['job'].update(status='complete' if result['complete'] else 'stopped', report=result)
                         if output: self.state['job']['capture_file'] = output.name

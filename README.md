@@ -21,9 +21,10 @@ E316 device.
 | Updates | Checksummed inactive slots, trial boot confirmation, previous-slot rollback, and original boot-file fallback |
 | Control driver | Bounded response parsing and timeouts, SPI transaction locking, and E200 receive flow control |
 | Receive tools | Named profiles, single/dual-channel I/Q capture, host triggers with prehistory, FPGA peak-level/external-edge triggers, and device-timed finite captures |
+| AD9361 receiver | Per-channel manual/slow/fast AGC, hardware gain-index and overload readback, shared DC/IQ tracking, LO-offset tuning, lock/settling checks, filter inspection and verified custom FIR taps |
 | Transmit | Dashboard controls for finite tones, two-tone waveforms and chirps, timed starts, cancellation and burst-acknowledgement reports |
 | Runtime | Unprivileged E200 services, FPGA compatibility checks, Netlink network updates, driver register readback, and device ownership leases |
-| Display | Local browser dashboard with health, daemon diagnostics, device ownership, spectrum, and waterfall |
+| Display | Local browser dashboard with receiver tuning, live radio telemetry and sample clipping, filter inspection, health, daemon diagnostics, device ownership, spectrum, and waterfall |
 | Calibration | Versioned, device-bound measurement records and frequency/relative-level corrections |
 | Validation | Hardware-free CI, structured receive benchmarks, and optional licensed firmware build runner |
 

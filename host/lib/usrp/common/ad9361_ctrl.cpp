@@ -111,6 +111,18 @@ public:
         _device.set_agc(chain, enable);
     }
 
+    int get_rx_status(const std::string& which, const std::string& name) override
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        return _device.get_rx_status(_get_chain_from_antenna(which), name);
+    }
+
+    double get_bw_filter(const std::string& which) override
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        return _device.get_bw_filter(_get_direction_from_antenna(which));
+    }
+
     void set_agc_mode(const std::string& which, const std::string& mode) override
     {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -207,6 +219,7 @@ public:
     //! read the internal temp sensor. Average over 3 results
     sensor_value_t get_temperature() override
     {
+        std::lock_guard<std::mutex> lock(_mutex);
         return sensor_value_t("temp", _device.get_average_temperature(), "C");
     }
 

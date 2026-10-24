@@ -26,6 +26,7 @@ def parser():
     sub=p.add_subparsers(dest='command',required=True)
     sub.add_parser('trust-console')
     sub.add_parser('discover')
+    inspect=sub.add_parser('radio-info');inspect.add_argument('--profile',default='e200-rx')
     sub.add_parser('health')
     sub.add_parser('diagnostics')
     sub.add_parser('sync-settings')
@@ -120,6 +121,13 @@ def main(argv=None):
         if not 1024<=args.port<=65535: raise ValueError('Choose an unprivileged TCP port')
         serve(Application(store,args.address,connect),args.port)
         return 0
+    elif args.command=='radio-info':
+        from .radio import Receiver
+        setting=store.get('profiles',args.profile)
+        correction=store.get('calibrations',setting['calibration']) if setting.get('calibration') else None
+        receiver=Receiver(args.address,setting,correction)
+        try: result=receiver.describe()
+        finally: receiver.close()
     elif args.command in ('capture','benchmark'):
         from .radio import Receiver
         settings=store.get('profiles',args.profile)

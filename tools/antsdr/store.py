@@ -26,7 +26,9 @@ def number(value, low, high, field):
 
 def profile(value):
     allowed = {'schema_version', 'name', 'frequency_hz', 'sample_rate', 'bandwidth_hz',
-               'gain_db', 'channels', 'antenna', 'clock_source', 'calibration'}
+               'gain_db', 'channels', 'antenna', 'clock_source', 'calibration',
+               'gain_mode', 'channel_settings', 'auto_dc_offset', 'auto_iq_balance',
+               'lo_offset_hz', 'settle_seconds', 'fir_taps'}
     if not isinstance(value, dict) or set(value)-allowed:
         raise ValueError('Unknown profile fields')
     value = dict(value)
@@ -38,7 +40,7 @@ def profile(value):
     number(value['bandwidth_hz'], 1, 56e6, 'bandwidth_hz')
     number(value['gain_db'], 0, 76, 'gain_db')
     channels = value['channels']
-    if not isinstance(channels, list) or not channels or len(set(channels)) != len(channels) or any(type(c) is not int or c not in (0, 1) for c in channels):
+    if not isinstance(channels, list) or not channels or any(type(c) is not int or c not in (0, 1) for c in channels) or len(set(channels)) != len(channels):
         raise ValueError('channels must be a unique list containing 0 and/or 1')
     if value.get('antenna', 'RX2') not in ('RX2', 'TX/RX'):
         raise ValueError('Unsupported receive antenna')
@@ -46,6 +48,30 @@ def profile(value):
         raise ValueError('Unsupported clock source')
     if value.get('calibration'):
         name(value['calibration'])
+    if value.get('gain_mode', 'manual') not in ('manual', 'slow', 'fast'):
+        raise ValueError('Gain mode must be manual, slow or fast')
+    for key in ('auto_dc_offset', 'auto_iq_balance'):
+        if key in value and type(value[key]) is not bool:
+            raise ValueError(key + ' must be a boolean')
+    number(value.get('lo_offset_hz', 0), -28e6, 28e6, 'lo_offset_hz')
+    number(value.get('settle_seconds', .05), 0, 1, 'settle_seconds')
+    if value.get('lo_offset_hz') and abs(value['lo_offset_hz']) + value['sample_rate']/2 > value['bandwidth_hz']/2:
+        raise ValueError('LO offset and sampled passband exceed analog bandwidth')
+    overrides = value.get('channel_settings', {})
+    if not isinstance(overrides, dict) or set(overrides) - {str(c) for c in channels}:
+        raise ValueError('Channel settings must refer to selected channels')
+    for override in overrides.values():
+        if not isinstance(override, dict) or set(override)-{'gain_db', 'gain_mode', 'antenna'}:
+            raise ValueError('Unknown channel setting')
+        number(override.get('gain_db', value['gain_db']), 0, 76, 'gain_db')
+        if override.get('gain_mode', value.get('gain_mode', 'manual')) not in ('manual', 'slow', 'fast'):
+            raise ValueError('Unsupported channel gain mode')
+        if override.get('antenna', value.get('antenna', 'RX2')) not in ('RX2', 'TX/RX'):
+            raise ValueError('Unsupported channel antenna')
+    if 'fir_taps' in value:
+        taps = value['fir_taps']
+        if not isinstance(taps, list) or not 16 <= len(taps) <= 128 or len(taps) % 16 or any(type(t) is not int or not -32768 <= t <= 32767 for t in taps):
+            raise ValueError('FIR taps must be 16–128 signed int16 coefficients in multiples of 16')
     return value
 
 
