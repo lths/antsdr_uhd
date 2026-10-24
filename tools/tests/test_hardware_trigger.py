@@ -1,8 +1,13 @@
+import json
+from pathlib import Path
+import tempfile
 import threading
 import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
+
+import numpy as np
 
 from antsdr.__main__ import DEFAULT
 from antsdr.radio import Receiver
@@ -19,6 +24,10 @@ class HardwareTriggerTest(unittest.TestCase):
         device.get_usrp_rx_info.return_value = {'mboard_serial': '0123456789abcdef'}
         device.get_rx_num_channels.return_value = 2
         device.get_rx_rate.return_value = 1e6
+        device.get_rx_freq.return_value = DEFAULT['frequency_hz']
+        device.get_rx_gain.return_value = DEFAULT['gain_db']
+        device.get_rx_bandwidth.return_value = DEFAULT['bandwidth_hz']
+        fake.types.RXMetadata.return_value.time_spec.get_real_secs.return_value = 100
         device.get_time_now.return_value.get_real_secs.return_value = 100
         for getter in ('get_rx_freq_range', 'get_rx_gain_range', 'get_rx_bandwidth_range'):
             getattr(device, getter).return_value.start.return_value = 0
@@ -82,6 +91,67 @@ class HardwareTriggerTest(unittest.TestCase):
         self.assertEqual(report['saved_samples_per_channel'], 0)
         self.assertEqual(report['timeouts'], 0)
         self.assertEqual(stream.issue_stream_cmd.call_args_list[-1].args[0].mode, 'stop')
+
+    def test_host_capture_with_overflow_does_not_report_success(self):
+        fake, device, stream = self.radio()
+        errors = iter(['overflow', 'none'])
+        def recv(buffer, metadata, timeout):
+            metadata.error_code = next(errors)
+            buffer.fill(np.complex64(.25))
+            return 4096 if metadata.error_code == 'none' else 0
+        stream.recv.side_effect = recv
+        ticks = iter(n / 100 for n in range(100))
+        with patch.dict('sys.modules', {'uhd': fake}), patch('antsdr.radio.time.monotonic', side_effect=lambda: next(ticks)):
+            receiver = Receiver('192.168.1.10', DEFAULT)
+            report = receiver.run(.01)
+            receiver.close()
+        self.assertTrue(report['triggered'])
+        self.assertGreater(report['saved_samples_per_channel'], 0)
+        self.assertEqual(report['overflows'], 1)
+        self.assertFalse(report['complete'])
+
+    def test_capture_stop_failure_is_recorded_as_incomplete(self):
+        fake, device, stream = self.radio()
+        def recv(buffer, metadata, timeout):
+            metadata.error_code = 'none'
+            buffer[:] = .25
+            return 4096
+        def command(value):
+            if value.mode == 'stop':
+                raise RuntimeError('stop failed')
+        stream.recv.side_effect = recv
+        stream.issue_stream_cmd.side_effect = command
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root) / 'capture.cf32'
+            ticks = iter(n / 100 for n in range(100))
+            with patch.dict('sys.modules', {'uhd': fake}), patch('antsdr.radio.time.monotonic', side_effect=lambda: next(ticks)):
+                receiver = Receiver('192.168.1.10', DEFAULT)
+                with self.assertRaisesRegex(RuntimeError, 'stop failed'):
+                    receiver.run(.01, output=output)
+                receiver.close()
+            report = json.loads(output.with_suffix('.cf32.json').read_text())
+        self.assertFalse(report['complete'])
+        self.assertIn('stop failed', report['error'])
+
+    def test_cancellation_during_final_receive_does_not_report_success(self):
+        fake, device, stream = self.radio()
+        cancel = threading.Event()
+        sizes = iter([4096, 4096, 1808])
+        def recv(buffer, metadata, timeout):
+            count = next(sizes)
+            metadata.error_code = 'none'
+            buffer[:, :count] = .25
+            if count == 1808:
+                cancel.set()
+            return count
+        stream.recv.side_effect = recv
+        with patch.dict('sys.modules', {'uhd': fake}):
+            receiver = Receiver('192.168.1.10', DEFAULT, trigger_mode='device-time')
+            report = receiver.run(.01, device_delay_seconds=.5, cancel=cancel)
+            receiver.close()
+        self.assertEqual(report['saved_samples_per_channel'], 10000)
+        self.assertTrue(report['cancelled'])
+        self.assertFalse(report['complete'])
 
 
 if __name__ == '__main__':

@@ -1,8 +1,8 @@
-# E200 operations and receive workspace
+# E200 operations and radio workspace
 
 The tools provide device health, verified inactive-slot deployment, profiles,
-calibration records, receive benchmarks, triggered I/Q capture, spectrum, and a
-waterfall dashboard. Radio operations receive only. The dashboard runs on this
+calibration records, receive benchmarks, triggered I/Q capture, spectrum,
+waterfall, and finite transmit controls. The dashboard runs on this
 computer at `http://127.0.0.1:8088`; it does not install a web server on the E200.
 
 ## Build once
@@ -45,7 +45,7 @@ authorized keys, `--identity /work/path/to/private-key` or an available SSH agen
 can replace password authentication. Private keys must be provided explicitly
 to the container; the wrapper does not mount your home or SSH agent by default.
 The dashboard requires a same-origin session token for changes and listens only
-on loopback. It permits one receive session at a time and reports competing
+on loopback. It permits one receive or transmit job at a time and reports competing
 radio ownership errors.
 
 ## Profiles and capture
@@ -96,8 +96,11 @@ Old FPGA images reject hardware level/edge modes explicitly.
 Files contain little-endian complex float32, interleaved by sample then channel.
 Each `.cf32.json` sidecar records requested and actual settings, device serial,
 device sample timestamps, trigger details, calibration, errors and discontinuities.
-Interrupted or untriggered captures have `complete: false`. Destination files are
-never overwritten. For two channels, reshape loaded data to `(-1, 2)`.
+Cancelled or untriggered captures, captures with receive overflows, and captures
+that fail while receiving, stopping, or closing their output have `complete: false`.
+Reports include cancellation state and error details when an exception occurs.
+Destination files are never overwritten. For two channels, reshape loaded data
+to `(-1, 2)`.
 Two-channel sessions synchronize both device timekeepers after final MIMO clock
 and streamer setup. The driver acknowledges arming on each radio before
 pulsing their shared synchronization line; the sidecar records that the device

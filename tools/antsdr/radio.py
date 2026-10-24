@@ -161,7 +161,8 @@ class Receiver:
                   'format':'little-endian complex float32, sample-major interleaved channels',
                   'received_samples_per_channel':0, 'saved_samples_per_channel':0,
                   'overflows':0, 'timeouts':0, 'other_errors':0, 'triggered':False,
-                  'first_sample_device_time':None, 'complete':False, 'discontinuities':[]}
+                  'first_sample_device_time':None, 'complete':False, 'cancelled':False,
+                  'discontinuities':[]}
         report['trigger_kind'] = 'host-delay' if trigger_after_seconds is not None else 'level' if threshold_dbfs is not None else 'immediate'
         if self.trigger_mode != 'host':
             report['trigger_kind'] = self.trigger_mode
@@ -227,15 +228,27 @@ class Receiver:
                     frame['time_utc'] = utc()
                     on_spectrum(frame)
                     last_frame = time.monotonic()
-            report['complete'] = report['triggered'] and (
+            report['complete'] = report['triggered'] and not (
+                report['overflows'] or report['other_errors'] or (cancel and cancel.is_set())) and (
                 report['saved_samples_per_channel'] == hardware_samples if hardware_samples else
                 finish is not None and time.monotonic() >= finish)
+        except BaseException as error:
+            report.update(complete=False, error=str(error))
+            raise
         finally:
             try:
-                self.stream.issue_stream_cmd(self.uhd.types.StreamCMD(self.uhd.types.StreamMode.stop_cont))
+                try:
+                    self.stream.issue_stream_cmd(self.uhd.types.StreamCMD(self.uhd.types.StreamMode.stop_cont))
+                finally:
+                    if handles:
+                        handles.close()
+            except BaseException as error:
+                report.update(complete=False, error=str(error))
+                raise
             finally:
-                if handles:
-                    handles.close()
+                report['cancelled'] = bool(cancel and cancel.is_set())
+                if report['cancelled']:
+                    report['complete'] = False
                 report['elapsed_seconds'] = time.monotonic()-start
                 report['ended_at_utc'] = utc()
                 if output:
