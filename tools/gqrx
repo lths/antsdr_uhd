@@ -1,0 +1,44 @@
+#!/bin/bash
+# Launch the matching UHD 4.1 Gqrx stack without changing system packages.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+image=${ANTSDR_GQRX_IMAGE:-antsdr-gqrx:22.04}
+if [[ ${1:-} == --help ]]; then
+    echo 'Usage: tools/gqrx [--build | --probe]'
+    echo 'Launches a separate E200 profile using the custom UHD 4.1 driver.'
+    exit 0
+fi
+if [[ $# -gt 1 || ( $# -eq 1 && $1 != --build && $1 != --probe ) ]]; then
+    echo 'Usage: tools/gqrx [--build | --probe]' >&2; exit 2
+fi
+if [[ ${1:-} == --build ]] || ! docker image inspect "$image" >/dev/null 2>&1; then
+    docker image inspect antsdr-host:22.04 >/dev/null 2>&1 || docker build -t antsdr-host:22.04 "$root/host/docker"
+    docker build -t "$image" -f "$root/host/docker/Dockerfile.gqrx" "$root/host/docker"
+fi
+if [[ ${1:-} == --build ]]; then exit 0; fi
+if [[ ! -f "$root/host/build-antsdr/lib/libuhd.so.4.1.0" ]]; then
+    echo 'Build the custom host driver first; see host/docker/build.sh.' >&2; exit 1
+fi
+args=(--rm --init --network host --user "$(id -u):$(id -g)"
+      --mount "type=bind,source=$root,target=/work")
+if [[ ${1:-} == --probe ]]; then
+    exec docker run "${args[@]}" "$image" /work/host/build-antsdr/utils/uhd_usrp_probe --args=type=ant,addr=192.168.1.10
+fi
+if [[ -z ${DISPLAY:-} || ! -d /tmp/.X11-unix ]]; then
+    echo 'Run this launcher from your graphical desktop (X11 or XWayland).' >&2; exit 1
+fi
+docker run "${args[@]}" "$image" python3 /work/tools/gqrx_profile.py /work/.antsdr/gqrx/e200.conf
+args+=(--env DISPLAY --env QT_X11_NO_MITSHM=1 --env QT_QPA_PLATFORM=xcb
+       --env "XAUTHLOCALHOSTNAME=$(hostname)" --env XDG_CONFIG_HOME=/work/.antsdr/gqrx/config
+       --mount type=bind,source=/tmp/.X11-unix,target=/tmp/.X11-unix,readonly)
+authority=${XAUTHORITY:-${HOME}/.Xauthority}
+if [[ -f "$authority" ]]; then
+    args+=(--env XAUTHORITY=/tmp/antsdr.Xauthority
+           --mount "type=bind,source=$authority,target=/tmp/antsdr.Xauthority,readonly")
+fi
+pulse=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse/native
+if [[ -S "$pulse" ]]; then
+    args+=(--env PULSE_SERVER=unix:/tmp/antsdr-pulse
+           --mount "type=bind,source=$pulse,target=/tmp/antsdr-pulse")
+fi
+exec docker run "${args[@]}" "$image" gqrx --conf /work/.antsdr/gqrx/e200.conf

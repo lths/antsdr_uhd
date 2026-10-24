@@ -1,0 +1,6 @@
+# Jammy's Gqrx/gr-uhd use the same UHD 4.1 ABI as this ANTSDR fork.
+FROM antsdr-host:22.04
+USER root
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    gqrx-sdr python3-pyqt5 && rm -rf /var/lib/apt/lists/*
+USER builder

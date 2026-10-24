@@ -81,6 +81,10 @@ are supplied through the environment; SSH identity files can be used after key
 provisioning. See the [operations guide](tools/README.md) for authentication,
 profile formats, trigger options, and data layout.
 
+For Gqrx, run `tools/gqrx` from your graphical desktop after building the host
+driver. It supplies a compatible Gqrx/UHD stack and a separate E200 profile;
+see the [Gqrx settings and launcher](tools/README.md#gqrx-receiver).
+
 ## Build E200 firmware
 
 The firmware flow uses **Vivado/SDK 2019.1**, Zynq-7000 support, and the SDK's

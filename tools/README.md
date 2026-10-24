@@ -20,6 +20,46 @@ outputs remain under `host/build-antsdr/`. Named profiles, calibration records,
 captures, and the device's verified public host key are stored under `.antsdr/`
 by default. `--state` selects a different directory mounted inside `/work`.
 
+## Gqrx receiver
+
+After building the host driver above, launch from a terminal on your graphical
+desktop:
+
+```sh
+tools/gqrx
+```
+
+The first launch builds `antsdr-gqrx:22.04` with Ubuntu 22.04 Gqrx and GNU Radio
+linked to this repository's UHD 4.1 library. A system Gqrx built against another
+UHD ABI, such as UHD 4.9, cannot use that library directly. The launcher uses
+X11/XWayland and the desktop's PulseAudio-compatible socket for sound. System
+packages and existing Gqrx profiles are unchanged. Docker must be available to
+your user; launch from the desktop rather than through `sudo`.
+
+The separate profile is saved at `.antsdr/gqrx/e200.conf`. Initial settings are:
+
+| Setting | Value |
+| --- | --- |
+| Device string | `uhd=0,type=ant,addr=192.168.1.10` |
+| Input sample rate | `1000000` samples/s |
+| Decimation | `1` |
+| Analog bandwidth | `1000000` Hz |
+| Antenna | `RX2` |
+| Hardware gain | Manual, `10` dB |
+| LNB LO | `0` |
+| Initial receive frequency | `902.050` MHz |
+
+Click the top-left start button or press **Ctrl+D** to receive. Enter the desired
+frequency and choose its demodulation mode in Receiver Options; for an FM
+broadcast station, use **WFM (mono)** or **WFM (stereo)**. Hardware gain is in
+Input controls; the Audio gain slider controls speaker volume. Attach the receive
+antenna to RX2. Gqrx provides receive controls and does not transmit.
+
+Saved settings persist across launches. Close Gqrx before using dashboard radio
+jobs or another UHD application: the device permits one radio owner at a time.
+No firmware reflash is required. To check connectivity without opening the GUI,
+run `tools/gqrx --probe`; `tools/gqrx --build` builds only the container image.
+
 ## Establish device trust and open the dashboard
 
 The first migration requires console access to verify the SSH host key. Supply
