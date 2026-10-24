@@ -22,9 +22,15 @@ minimum-gain 902.1 MHz bursts and simultaneous receive.
 - [x] Finite transmit dashboard controls with burst acknowledgements
 - [x] Source E200 discovery, IPv4 setup and identity runtime
 - [x] Modern E200 kernel, root filesystem and packaged U-Boot build
+- [x] Safe FPGA management compatibility checks before register access
+- [x] Live daemon diagnostics and FPGA readback in the dashboard
+- [x] Netlink handling for address removal, link loss and recovery
+- [x] Restricted NIC management API and separate unprivileged daemons
+- [x] Automatic EEPROM board-revision identification
+- [x] Device ownership leases with independent FPGA expiry and DDR session isolation
 
-Implementation details, operation commands and measured results will be recorded
-here as each feature is validated. FPGA-resident spectrum processing requires a
+Implementation details, operation commands and measured results are recorded
+below. FPGA-resident spectrum processing requires a
 separate resource and timing assessment; the first display processes samples on
 the host. The E200 discovery/network runtime is now built from source; E316
 retains the vendor daemon.
@@ -144,3 +150,40 @@ edge modes support both. Hardware modes do not retain pretrigger samples. The
 modern profile currently targets SD boot on E200; QSPI update paths, E316,
 external reference clocks, RF calibration and prolonged soak tests remain
 outside the hardware validation performed here.
+
+## Runtime 2 management and ownership
+
+Runtime 2 adds all six management improvements: safe FPGA compatibility
+checking, dashboard diagnostics, Netlink network updates, restricted driver
+access, EEPROM board identification, and ownership enforced by the FPGA.
+The daemons run as UIDs 65301/65302 with zero effective capabilities and no
+physical-memory mappings. The modern device tree reserves the FPGA's 64 MiB TX
+queue from Linux allocation.
+
+On the connected E200, IPv4 removal reached the FPGA in 20–30 ms and link-down
+in 50 ms. Identity came from EEPROM and the existing DNA serial was preserved.
+Physical tests confirmed competing lease requests are rejected, control packets
+are gated by owner IP, ownership expires with the daemon stopped, and a real
+UHD process renews through a six-second receive session. Killing that process
+left the device available again in approximately 2.6 seconds.
+
+Transmit validation exposed a vendor DDR FIFO bug: its 128-word threshold could
+start a 256-word AXI burst with insufficient input. The corrected core waits
+for a complete burst and for the write response before exposing memory to
+readers. Its regression checks packet pauses, AXI stalls, delayed write
+commitment, wraparound and final partial-burst drainage. The original core
+fails that test by popping an empty input FIFO. Ownership also remains attached
+to the actual control and sample transports through controller teardown.
+
+See [runtime management](runtime/README.md) for the protocol, permissions,
+compatibility requirements, and diagnostics. With an idle E200, this manual
+regression checks device ownership and control gating without sending RF:
+
+```sh
+python3 host/tests/ant_device_lease.py \
+    --report firmware/build/validation/device-lease.json
+```
+
+This test requires exclusive radio access but no SSH credentials. FPGA tests
+`run_lease.sh` and `run_deep_fifo.sh` require the licensed Vivado installation.
+External PPS electrical verification still requires a connected pulse source.
