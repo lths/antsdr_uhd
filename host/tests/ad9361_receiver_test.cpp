@@ -12,6 +12,18 @@ public:
     void poke8(uint32_t reg, uint8_t value) override { values[reg] = value; }
 };
 
+BOOST_AUTO_TEST_CASE(fastlock_rejects_invalid_empty_and_unlocked_profiles)
+{
+    auto io = std::make_shared<receiver_registers>();
+    ad9361_device_t device(nullptr, io);
+    BOOST_CHECK_THROW(device.store_rx_fastlock(8), uhd::value_error);
+    BOOST_CHECK_THROW(device.recall_rx_fastlock(8), uhd::value_error);
+    BOOST_CHECK_THROW(device.recall_rx_fastlock(0), uhd::value_error);
+    BOOST_CHECK(io->values.empty());
+    BOOST_CHECK_THROW(device.store_rx_fastlock(0), uhd::runtime_error);
+    BOOST_CHECK_EQUAL(io->values.count(0x25f), 0);
+}
+
 BOOST_AUTO_TEST_CASE(receiver_live_status_reads_correct_chain_and_shared_tracking)
 {
     auto io = std::make_shared<receiver_registers>();

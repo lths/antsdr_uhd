@@ -1,0 +1,34 @@
+#!/bin/bash
+# Isolated GPSDO reader: only the selected device nodes and public status state.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+if [[ ${1:-} == --help ]]; then
+    echo 'Usage: tools/gpsdo [--status | --pps on | --pps off]'
+    echo 'No arguments: run the read-only GPS/UTC bridge for the dashboard.'
+    exit 0
+fi
+mapfile -t nodes < <(PYTHONPATH="$root/tools" python3 -m antsdr.gpsdo --devices)
+[[ ${#nodes[@]} -ge 1 ]] || { echo 'LBE-1421 not found' >&2; exit 1; }
+args=(--rm --init --user 0 --network none --read-only --cap-drop ALL
+      --security-opt no-new-privileges --device "${nodes[0]}"
+      --mount "type=bind,source=$root,target=/work,readonly"
+      --env PYTHONDONTWRITEBYTECODE=1)
+options=(--hid "${nodes[0]}")
+if [[ $# -eq 0 ]]; then
+    mkdir -p "$root/.antsdr/timing"
+    chmod 0770 "$root/.antsdr/timing"
+    args+=(--name antsdr-gpsdo --group-add "$(id -g)"
+           --mount "type=bind,source=$root/.antsdr/timing,target=/state")
+    options+=(--state /state/gpsdo.json)
+    if [[ ${#nodes[@]} -eq 2 ]]; then
+        args+=(--device "${nodes[1]}")
+        options+=(--serial "${nodes[1]}")
+    fi
+elif [[ $# -eq 1 && $1 == --status ]]; then
+    :
+elif [[ $# -eq 2 && $1 == --pps && ( $2 == on || $2 == off ) ]]; then
+    options+=(--pps "$2")
+else
+    echo 'Usage: tools/gpsdo [--status | --pps on | --pps off]' >&2; exit 2
+fi
+exec docker run "${args[@]}" antsdr-host:22.04 python3 -m antsdr.gpsdo "${options[@]}"

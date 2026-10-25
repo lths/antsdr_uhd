@@ -676,6 +676,15 @@ ant_impl::ant_impl(const uhd::device_addr_t &device_addr)
         UHD_ASSERT_THROW(num_radio_chains <= 2);
         _radio_perifs.resize(num_radio_chains);
         _codec_mgr = ad936x_manager::make(_codec_ctrl, num_radio_chains);
+        _tree->create<int>(mb_path / "rx_fastlock/store")
+            .add_coerced_subscriber([this](int slot) { _codec_ctrl->store_rx_fastlock(size_t(slot)); });
+        _tree->create<int>(mb_path / "rx_fastlock/recall")
+            .add_coerced_subscriber([this](int slot) {
+                const double frequency = _codec_ctrl->recall_rx_fastlock(size_t(slot));
+                this->update_bandsel("RX", frequency);
+            });
+        _tree->create<bool>(mb_path / "rx_fastlock/disable")
+            .add_coerced_subscriber([this](bool value) { if (value) _codec_ctrl->disable_rx_fastlock(); });
         _codec_mgr->init_codec();
         for (size_t i = 0; i < _radio_perifs.size(); i++)
             this->setup_radio(i);

@@ -199,6 +199,9 @@ public:
 
     /* Get the current RX or TX frequency. */
     double get_freq(direction_t direction);
+    void store_rx_fastlock(size_t slot);
+    double recall_rx_fastlock(size_t slot);
+    void disable_rx_fastlock();
 
     // Live status, including the gain table index while automatic gain is active.
     int get_rx_status(chain_t chain, const std::string& name);
@@ -352,6 +355,14 @@ private:    //Members
     std::recursive_mutex  _mutex;
     bool _use_dc_offset_tracking;
     bool _use_iq_balance_tracking;
+    struct rx_fastlock_profile {
+        double frequency, clock_rate, bandwidth;
+        uint8_t inputsel, gain_table, alc_original, alc_written;
+    };
+    std::map<size_t, rx_fastlock_profile> _rx_fastlock;
+    int _rx_fastlock_active = -1;
+    void _write_rx_fastlock_word(size_t slot, size_t word, uint8_t value);
+    void _exit_rx_fastlock();
 
     // Filter API
     using filter_tuple = std::tuple<

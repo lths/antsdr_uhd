@@ -1848,6 +1848,8 @@ double ad9361_device_t::set_clock_rate(const double req_rate)
         // actual value we're currently running.
         return _baseband_bw;
     }
+    _exit_rx_fastlock();
+    _rx_fastlock.clear(); // VCO profiles cannot survive a clock-chain change.
 
     /* We must be in the SLEEP / WAIT state to do this. If we aren't already
      * there, transition the ENSM to State 0. */
@@ -2095,6 +2097,8 @@ void ad9361_device_t::set_timing_mode(const ad9361_device_t::timing_mode_t timin
 double ad9361_device_t::tune(direction_t direction, const double value)
 {
     std::lock_guard<std::recursive_mutex> lock(_mutex);
+    if (direction == RX)
+        _exit_rx_fastlock();
     double last_cal_freq;
 
     if (direction == RX) {
@@ -2162,6 +2166,116 @@ double ad9361_device_t::tune(direction_t direction, const double value)
     }
 
     return get_freq(direction);
+}
+
+// RX fast-lock register programming follows AD9361 UG-570, pp.22-24, and
+// Analog Devices no-OS ad9361_fastlock_store/prepare/recall, including the
+// same-ALC and exit-mode workarounds. Profiles remain limited to the current
+// calibration window, gain table, RF port and clock/filter configuration.
+void ad9361_device_t::_write_rx_fastlock_word(size_t slot, size_t word, uint8_t value)
+{
+    _io_iface->poke8(0x25c, uint8_t((slot << 4) | word));
+    _io_iface->poke8(0x25d, value);
+    _io_iface->poke8(0x25f, 3);
+    _io_iface->poke8(0x25f, 0);
+}
+
+void ad9361_device_t::store_rx_fastlock(size_t slot)
+{
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    if (slot > 7 || _rx_fastlock_active >= 0)
+        throw uhd::value_error("Store fast-lock slots 0..7 only after a normal RX tune");
+    if (!(_io_iface->peek8(0x247) & 2))
+        throw uhd::runtime_error("Cannot store an unlocked RX synthesizer");
+    auto read = [this](uint32_t reg) { return _io_iface->peek8(reg); };
+    uint8_t words[16];
+    for (unsigned i = 0; i < 5; i++)
+        words[i] = read(0x231 + i);
+    words[5] = ((read(0x242) & 7) << 4) | (read(0x239) & 15);
+    const auto current = read(0x23b) & 63;
+    words[6] = (((read(0x242) >> 3) & 3) << 6) | current;
+    words[7] = current;
+    words[8] = (read(0x240) & 15) * 17;
+    words[9] = (read(0x23f) & 15) * 17;
+    words[10] = ((read(0x23e) & 15) << 4) | (read(0x23e) >> 4);
+    words[11] = (read(0x23f) >> 4) * 17;
+    words[12] = (((read(0x250) >> 4) & 7) << 4) | (read(0x005) & 15);
+    words[13] = (((read(0x238) >> 3) & 15) << 4) | (read(0x251) & 15);
+    words[14] = read(0x237);
+    words[15] = ((read(0x236) & 127) << 1) | (read(0x238) & 1);
+    _rx_fastlock.erase(slot);
+    for (unsigned i = 0; i < 16; i++) {
+        _write_rx_fastlock_word(slot, i, words[i]);
+        _io_iface->poke8(0x25c, uint8_t((slot << 4) | i));
+        if (read(0x25e) != words[i])
+            throw uhd::runtime_error("RX fast-lock RAM verification failed");
+    }
+    _rx_fastlock[slot] = {_rx_freq, _req_clock_rate, _rx_analog_bw,
+                         _regs.inputsel, _curr_gain_table, words[15], words[15]};
+}
+
+void ad9361_device_t::disable_rx_fastlock()
+{
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    if (_rx_fastlock_active >= 0) {
+        const double frequency = _rx_freq;
+        _exit_rx_fastlock();
+        tune(RX, frequency); // Restore normal synth registers and normal tune semantics.
+    }
+}
+
+void ad9361_device_t::_exit_rx_fastlock()
+{
+    if (_rx_fastlock_active < 0)
+        return;
+    _io_iface->poke8(0x25a, 0);
+    _io_iface->poke8(0x236, _io_iface->peek8(0x236) | 0x80);
+    _io_iface->poke8(0x238, _io_iface->peek8(0x238) | 2);
+    _io_iface->poke8(0x236, _io_iface->peek8(0x236) & ~0x80);
+    _io_iface->poke8(0x238, _io_iface->peek8(0x238) & ~2);
+    _io_iface->poke8(0x23a, _io_iface->peek8(0x23a) | 0x80);
+    _io_iface->poke8(0x015, _io_iface->peek8(0x015) & ~2);
+    _rx_fastlock_active = -1;
+    _req_rx_freq = 0; // Normal PLL registers must be retuned after leaving RAM mode.
+}
+
+double ad9361_device_t::recall_rx_fastlock(size_t slot)
+{
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    auto found = _rx_fastlock.find(slot);
+    if (slot > 7 || found == _rx_fastlock.end())
+        throw uhd::value_error("RX fast-lock slot is empty or invalid");
+    auto& profile = found->second;
+    if (profile.clock_rate != _req_clock_rate || profile.bandwidth != _rx_analog_bw
+        || profile.inputsel != _regs.inputsel || profile.gain_table != _curr_gain_table
+        || std::abs(profile.frequency - _last_rx_cal_freq) > AD9361_CAL_VALID_WINDOW)
+        throw uhd::value_error("Fast-lock profile requires the original RF band, clock, filter and calibration window");
+    const uint8_t old_alc = _rx_fastlock_active < 0
+        ? uint8_t((_io_iface->peek8(0x236) & 127) << 1)
+        : _rx_fastlock.at(size_t(_rx_fastlock_active)).alc_written;
+    if ((old_alc >> 1) == (profile.alc_written >> 1)) {
+        profile.alc_written = ((profile.alc_original >> 1) == (profile.alc_written >> 1))
+            ? uint8_t(profile.alc_written + 2) : profile.alc_original;
+        _write_rx_fastlock_word(slot, 15, profile.alc_written);
+    }
+    if (_rx_fastlock_active < 0) {
+        _io_iface->poke8(0x25b, 0); // No initial wide-loop option.
+        _io_iface->poke8(0x25a, uint8_t((slot << 5) | 1));
+        _io_iface->poke8(0x25f, 0);
+        _io_iface->poke8(0x015, _io_iface->peek8(0x015) | 2);
+        _io_iface->poke8(0x23a, _io_iface->peek8(0x23a) & ~0x80);
+    }
+    _io_iface->poke8(0x25a, uint8_t((slot << 5) | 1));
+    _rx_fastlock_active = int(slot);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+    while (!(_io_iface->peek8(0x247) & 2)) {
+        if (std::chrono::steady_clock::now() >= deadline)
+            throw uhd::runtime_error("RX fast-lock recall failed to lock");
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
+    _regs.vcodivs = (_regs.vcodivs & 0xf0) | (_io_iface->peek8(0x005) & 15);
+    _rx_freq = _req_rx_freq = profile.frequency;
+    return _rx_freq;
 }
 
 /* Get the current RX or TX frequency. */

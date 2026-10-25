@@ -66,6 +66,11 @@ def configure(device, uhd, settings, frequency):
 
 def telemetry(device, channels):
     result = {'updated_monotonic': time.monotonic(), 'channels': [], 'errors': []}
+    try:
+        if 'ref_locked' in device.get_mboard_sensor_names(0):
+            result['reference_locked'] = device.get_mboard_sensor('ref_locked', 0).to_bool()
+    except Exception as error:
+        result['errors'].append({'channel': 'board', 'error': str(error)})
     for channel in channels:
         item = {'channel': channel}
         try:

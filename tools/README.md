@@ -258,9 +258,138 @@ python3 host/tests/ant_receiver_controls.py \
   --report firmware/build/validation/receiver-controls.json
 ```
 
-Fastlock hopping, hybrid/pin-synchronized AGC, TDD state scheduling, arbitrary
+RX fast-lock scanning is available through the timing and measurement tools
+below. TX fast-lock, hybrid/pin-synchronized AGC, TDD state scheduling, arbitrary
 gain-table uploads, and a public recalibration API remain separate extensions.
 External LO and TX-monitor features also need board routing verification.
+
+## Timing, recordings and measurements
+
+Run `tools/gpsdo` in another terminal while using the dashboard or CLI. It
+auto-detects exactly one LBE-1421 and reads its HID status and USB NMEA stream
+inside an isolated container. It has no network access or Linux capabilities;
+only that device's nodes and the timing-status directory are writable. Status
+contains satellite count and UTC, excluding position coordinates. The dashboard
+does not require root and does not acquire a second radio owner to read PPS.
+Use `tools/gpsdo --status` for an immediate hardware status check. If replugged,
+restart the bridge to select the new device nodes; stale state is marked unavailable.
+
+The GPS/PPS panel shows source lock, Output 1 mode, PPS age, missed pulses,
+time discontinuities, and UTC association. Board PPS is measured through the
+active radio session; an idle dashboard labels its last observation accordingly.
+The short-term local clock-offset estimate is available only with external PPS
+and a GPS-locked source. It is diagnostic data, not an automatic calibration.
+
+To require GPS-derived sample timestamps, save a receive profile with
+`"time_source": "external"` and `"utc_timestamps": true`. The dashboard exposes
+both controls. Initialization waits for two consecutive matching PPS/NMEA epochs;
+ambiguous, delayed, invalid or stale NMEA messages do not produce UTC tags.
+The LBE-1421's observed RMC timestamp is halfway through the second; association
+uses its integral UTC second and accepts at most 0.7 seconds of arrival delay
+from the observed PPS. Re-establishing the association requires two consecutive
+epochs. UTC loss during a required-UTC capture marks it incomplete even if lock
+returns before the capture ends. This is a software epoch association, not a
+calibration of absolute antenna-to-ADC timing. PPS cable delay and local-clock
+interpolation error are not removed. Host `started_at_utc` and frame wall times
+remain separate from `first_sample_utc` / `first_saved_sample_utc`.
+
+```sh
+tools/run gps-status
+tools/run timing --profile gps-utc-rx --duration 10 --report .antsdr/timing-check.json
+tools/run capture --profile gps-utc-rx --duration 1 --output .antsdr/captures/utc.cf32
+tools/run sigmf --input .antsdr/captures/utc.cf32 --prefix .antsdr/exports/utc
+```
+
+Create `gps-utc-rx` through the profile editor; existing profiles are preserved.
+The SigMF export writes private `.sigmf-data` and `.sigmf-meta` files, retains
+channel interleaving, verifies length, and records a SHA-512 digest. It includes
+GPS UTC only when associated, and retains incompleteness/errors/discontinuities
+in an optional `antsdr` namespace. Existing destinations are never overwritten.
+The dashboard can also export each new capture automatically. Exports conform
+to the [SigMF v1.2.6 schema](https://github.com/sigmf/SigMF/blob/v1.2.6/sigmf-schema.json).
+
+The E200 shares one PPS/10 MHz reference connector. Select one external input
+mode at a time; the profile validator rejects external clock plus external PPS.
+`clock_source: external` now requires three consecutive reference-lock readings
+before RX begins, with `reference_timeout_seconds` (default 30, maximum 120).
+Loss of reference lock invalidates the capture. The LBE-1421's Output 1 clock
+must already be 10 MHz for the following helper:
+
+```sh
+tools/check-reference --report firmware/build/validation/reference-clock.json --timeout 60
+```
+
+This temporarily selects the existing 10 MHz clock instead of PPS, measures
+lock, captures 25,000 receive samples, selects no reference to check loss,
+restores the reference and checks reacquisition. Its EXIT trap restores the
+previous PPS selection. It sends no transmit samples and leaves Output 2
+unchanged. Close radio clients and finish any recording first. The FPGA source
+corrects `CLKIN_10MHz_REQ` to an output so its clock buffer can be enabled;
+this hardware change requires the rebuilt FPGA image. A selected clock setting
+alone does not establish that the physical reference is locked.
+
+The Receive scanning and verification panel exposes scan, throughput and
+endurance jobs with the same exclusive radio owner and Stop control. CLI equivalents:
+
+```sh
+tools/run scan --profile e200-rx --frequencies 902050000 902250000 902450000 \
+    --dwell .025 --cycles 3 --report .antsdr/scan.json
+tools/run throughput --profile e200-rx --all-channels --duration 5 \
+    --rates 1000000 5000000 10000000 15000000 20000000 25000000 \
+    --report .antsdr/throughput.json
+tools/run soak --profile e200-rx --duration 3600 --report .antsdr/endurance.json
+```
+
+RX fast-lock supports eight on-chip profiles within a 100 MHz calibration
+window, one selected channel and zero LO offset. Each slot's 16 RAM words are
+read back after programming. Recall verifies RF band, gain table, clock/filter
+compatibility and LO lock; ordinary tuning exits fast-lock mode. Host/SPI
+latency and analog settling are reported separately from sample timestamps;
+this is not an FPGA-timed hop scheduler. It does not implement TX fast-lock.
+See [AD9361 UG-570](https://www.analog.com/media/en/technical-documentation/user-guides/AD9361_Reference_Manual_UG-570.pdf)
+and the [ADI no-OS driver](https://github.com/analogdevicesinc/no-OS/blob/main/drivers/rf-transceiver/ad9361/ad9361.c)
+for profile format and the ALC/exit workarounds.
+
+Throughput reports every requested rate/channel case, actual coerced rates,
+errors and highest tested passing rates. Completion of a sweep does not mean
+every requested rate passed. `sc16` consumes four bytes per complex sample per
+channel before protocol overhead, so the 1 Gb/s link limits sustained rates
+below the chip's maximum. Endurance stores stream counters, temperature,
+clipping, timing and free-storage observations every ten seconds plus its final
+report. Raw samples are optional via `soak --output`; available disk space is
+checked before recording. Closing, cancellation and receive failures cannot
+report a complete endurance test. The default records no raw samples.
+
+Controlled RF measurements are offline analyses of existing complete captures:
+
+```sh
+tools/run analyze --input .antsdr/captures/bench.cf32 --tone-hz 62500 \
+    --report .antsdr/bench.json
+tools/run analyze --input .antsdr/captures/agc-step.cf32 --step-at .5 \
+    --report .antsdr/agc-step.json
+tools/run analyze --input .antsdr/captures/level.cf32 --reference-dbm -50 \
+    --reference 'Measured -50 dBm at RX connector after attenuation' --report .antsdr/level.json
+tools/run filter-response --passband .antsdr/captures/pass.cf32 \
+    --stopband .antsdr/captures/stop.cf32 \
+    --reference 'Equal measured input power, 62.5 kHz and 2 MHz offsets' \
+    --report .antsdr/filter-response.json
+```
+
+Reports include RMS/peak/clipping, DC level, image rejection around the stated
+baseband tone, and bounded-resolution RMS traces. For AGC/overload recovery,
+supply the known input-step time; settling requires the remaining trace to stay
+within 1 dB of its final median, with at least 20 ms after settling. RF overload
+flags remain instantaneous sensor snapshots. Absolute-level correction requires
+the source level and reference-plane description supplied by the operator.
+Filter comparison requires identical device/channel/rate/gain/bandwidth and
+manual gain, with equal-power stimuli; rejection can be noise-floor limited.
+These tools do not generate RF, replace a calibrated source/power meter, or
+establish bench calibration from an antenna/noise recording. RF coherence is
+outside this change's scope at the owner's request.
+
+For long tests during development, copy the UHD library, Python binding and
+tools to an isolated runtime before starting. Rebuilding the shared library in
+place can invalidate memory mappings in an already-running client.
 
 ## Calibration and persistent settings
 

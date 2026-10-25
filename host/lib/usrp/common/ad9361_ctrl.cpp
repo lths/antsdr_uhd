@@ -137,6 +137,24 @@ public:
     }
 
     //! set a new clock rate, return the exact value
+    void store_rx_fastlock(size_t slot) override
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _device.store_rx_fastlock(slot);
+    }
+
+    double recall_rx_fastlock(size_t slot) override
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        return _device.recall_rx_fastlock(slot);
+    }
+
+    void disable_rx_fastlock() override
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        _device.disable_rx_fastlock();
+    }
+
     double set_clock_rate(const double rate) override
     {
         std::lock_guard<std::mutex> lock(_mutex);

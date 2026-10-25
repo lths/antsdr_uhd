@@ -138,6 +138,9 @@ public:
 
     //! get the current frequency for the given frontend
     virtual double get_freq(const std::string& which) = 0;
+    virtual void store_rx_fastlock(size_t slot) = 0;
+    virtual double recall_rx_fastlock(size_t slot) = 0;
+    virtual void disable_rx_fastlock() = 0;
 
     //! turn on/off Catalina's data port loopback
     virtual void data_port_loopback(const bool on) = 0;

@@ -78,7 +78,7 @@ module antsdr_e200 (
         // PPS or 10 MHz 
         input  wire             PPS_IN_EXT      ,
         input  wire             CLKIN_10MHz     ,
-        input  wire             CLKIN_10MHz_REQ ,
+        output wire             CLKIN_10MHz_REQ ,
 
         // Clock disciplining / AD5662 controls
         output wire             CLK_40M_DAC_nSYNC,

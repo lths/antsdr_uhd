@@ -29,12 +29,39 @@ minimum-gain 902.1 MHz bursts and simultaneous receive.
 - [x] Automatic EEPROM board-revision identification
 - [x] Device ownership leases with independent FPGA expiry and DDR session isolation
 - [x] AD9361 receiver tuning, per-channel AGC, live sensors and verified FIR tap loading (host driver/tools)
+- [x] GPS/PPS dashboard health and validated PPS/NMEA UTC sample tags
+- [x] Private SigMF export with UTC, channel interleaving, checksum and loss metadata
+- [x] RX fast-lock profiles and bounded receive scanning
+- [x] Single/dual receive-rate sweeps and receive endurance reporting
+- [x] Controlled receiver step/level/image/filter analysis tools
 
 Implementation details, operation commands and measured results are recorded
 below. FPGA-resident spectrum processing requires a
 separate resource and timing assessment; the first display processes samples on
 the host. The E200 discovery/network runtime is now built from source; E316
 retains the vendor daemon.
+
+## Timing, scan and measurement tools
+
+The host tools include a read-only LBE-1421 USB bridge, active-owner PPS
+monitoring, conservative PPS/NMEA UTC association, SigMF recording export,
+eight-slot RX fast-lock scanning, and throughput/endurance jobs in the CLI and
+dashboard. Controlled receiver analyses cover RMS/peak/clipping, DC/image
+levels, known-step settling and equal-input filter rejection. Absolute levels
+require an operator-supplied measured reference. RF coherence is excluded at
+the owner's request.
+
+External clock profiles require confirmed lock and invalidate a capture if lock
+is lost. The E200 FPGA now declares the reference-buffer enable pin
+`CLKIN_10MHz_REQ` as an output; its previous input direction left the enable
+undriven. The rebuilt design uses 40,631/53,200 LUTs, 95.5/140 block RAM tiles,
+and 100/220 DSPs. Routed setup/hold slack is +0.232/+0.034 ns with no failing
+timing endpoints. The placed I/O report confirms the output on package pin M20.
+Reference-lock and extended-streaming results are recorded separately from
+the implementation checks under `firmware/build/validation/`.
+
+See the [timing and measurement guide](../tools/README.md#timing-recordings-and-measurements)
+for commands, UTC association limits, shared-connector behavior and bench setup.
 
 ## Validation
 

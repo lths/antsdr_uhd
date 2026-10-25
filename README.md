@@ -85,6 +85,12 @@ For Gqrx, run `tools/gqrx` from your graphical desktop after building the host
 driver. It supplies a compatible Gqrx/UHD stack and a separate E200 profile;
 see the [Gqrx settings and launcher](tools/README.md#gqrx-receiver).
 
+The dashboard also supports GPS/PPS health, GPS UTC sample tags, optional SigMF
+export, RX fast-lock scanning, receive-rate sweeps and endurance checks. Run
+`tools/gpsdo` separately for read-only LBE-1421 status and NMEA telemetry. See
+the [timing and measurement guide](tools/README.md#timing-recordings-and-measurements)
+for reference-clock checks and controlled receiver measurements.
+
 ## Build E200 firmware
 
 The firmware flow uses **Vivado/SDK 2019.1**, Zynq-7000 support, and the SDK's

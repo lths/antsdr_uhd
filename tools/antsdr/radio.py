@@ -79,6 +79,8 @@ class Receiver:
         self.calibration = calibration
         self.device = self.stream = None
         self.telemetry = None
+        self.timing = None
+        self.reference_lock_lost = False
         try:
             self._initialize(address)
         except BaseException:
@@ -120,6 +122,21 @@ class Receiver:
             raise ValueError('Selected channels have different actual sample rates')
         if len(settings['channels']) > 1:
             self.device.set_time_now(uhd.types.TimeSpec(0.0))
+        self.device.set_time_source(settings.get('time_source', 'internal'), 0)
+        if settings.get('clock_source') == 'external':
+            if 'ref_locked' not in self.device.get_mboard_sensor_names(0):
+                raise RuntimeError('External reference lock sensor is unavailable')
+            deadline = time.monotonic() + settings.get('reference_timeout_seconds', 30)
+            stable = 0
+            while stable < 3:
+                stable = stable + 1 if self.device.get_mboard_sensor('ref_locked', 0).to_bool() else 0
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('External 10 MHz reference did not lock; check the source and shared connector mode')
+                time.sleep(.1)
+        from .timing import Timing
+        self.timing = Timing(self.device, settings.get('time_source', 'internal'))
+        if settings.get('utc_timestamps'):
+            self.timing.wait_utc()
         self.actual = [{'channel': c, 'frequency_hz': self.device.get_rx_freq(c),
                         'sample_rate': self.device.get_rx_rate(c),
                         'gain_db': self.device.get_rx_gain(c),
@@ -129,9 +146,13 @@ class Receiver:
     def describe(self):
         return {'complete': True, 'requested': self.settings, 'actual': self.actual,
                 'capabilities': tuning.capabilities(self.device, self.settings['channels']),
-                'telemetry': tuning.telemetry(self.device, self.settings['channels'])}
+                'telemetry': tuning.telemetry(self.device, self.settings['channels']),
+                'timing': self.timing.status()}
 
     def close(self):
+        if self.timing:
+            self.timing.close()
+            self.timing = None
         self.stream = None
         self.device = None
 
@@ -179,6 +200,11 @@ class Receiver:
                   'overflows':0, 'timeouts':0, 'other_errors':0, 'triggered':False,
                   'first_sample_device_time':None, 'complete':False, 'cancelled':False,
                   'discontinuities':[]}
+        report['clock_source'] = self.settings.get('clock_source', 'internal')
+        report['time_source'] = self.settings.get('time_source', 'internal')
+        report['first_sample_utc'] = None
+        report['first_saved_sample_utc'] = None
+        initial_utc_losses = self.timing.status()['utc_losses']
         report['trigger_kind'] = 'host-delay' if trigger_after_seconds is not None else 'level' if threshold_dbfs is not None else 'immediate'
         if self.trigger_mode != 'host':
             report['trigger_kind'] = self.trigger_mode
@@ -202,6 +228,8 @@ class Receiver:
         def monitor():
             while not monitor_stop.is_set():
                 self.telemetry = tuning.telemetry(self.device, self.settings['channels'])
+                if self.settings.get('clock_source') == 'external' and not self.telemetry.get('reference_locked', False):
+                    self.reference_lock_lost = True
                 monitor_stop.wait(1)
         monitor_thread = None
         try:
@@ -235,6 +263,7 @@ class Receiver:
                     continue
                 if report['first_sample_device_time'] is None:
                     report['first_sample_device_time'] = metadata.time_spec.get_real_secs()
+                    report['first_sample_utc'] = self.timing.utc(report['first_sample_device_time'])
                 report['received_samples_per_channel'] += n
                 block = buffer[:, :n]
                 for i in range(len(clipped)):
@@ -248,6 +277,7 @@ class Receiver:
                     report['pretrigger_samples_per_channel'] = sum(b.shape[1] for b in accepted[:-1])
                     report['trigger_sample_device_time'] = metadata.time_spec.get_real_secs()
                     report['first_saved_sample_device_time'] = metadata.time_spec.get_real_secs()-report['pretrigger_samples_per_channel']/self.rate
+                    report['first_saved_sample_utc'] = self.timing.utc(report['first_saved_sample_device_time'])
                     finish = time.monotonic()+duration+(1 if hardware_samples else 0)
                 for saved in accepted:
                     if handles:
@@ -258,6 +288,10 @@ class Receiver:
                                      self.calibration['level_correction_db'] if self.calibration else 0)
                     frame['time_utc'] = utc()
                     frame['telemetry'] = self.telemetry
+                    frame['timing'] = self.timing.status()
+                    frame['stream_stats'] = {key: report[key] for key in
+                                             ('received_samples_per_channel', 'overflows', 'timeouts', 'other_errors')}
+                    frame['stream_stats']['elapsed_seconds'] = time.monotonic()-start
                     frame['signal'] = [{'channel': c, 'clipped_samples': clipped[i],
                                         'peak_dbfs': 20*math.log10(max(peaks[i], 1e-12))}
                                        for i, c in enumerate(self.settings['channels'])]
@@ -289,6 +323,15 @@ class Receiver:
                 raise
             finally:
                 report['telemetry'] = self.telemetry
+                report['timing'] = self.timing.status()
+                report['reference_lock_lost'] = self.reference_lock_lost
+                if self.reference_lock_lost:
+                    report['complete'] = False
+                    report['timing_error'] = 'External reference lock was lost during the capture'
+                if self.settings.get('utc_timestamps') and (
+                        not report['timing']['utc_valid'] or report['timing']['utc_losses'] > initial_utc_losses):
+                    report['complete'] = False
+                    report['timing_error'] = 'GPS UTC validity was lost during the capture'
                 report['signal'] = [{'channel': c, 'clipped_samples': clipped[i],
                                      'peak_dbfs': 20*math.log10(max(peaks[i], 1e-12))}
                                     for i, c in enumerate(self.settings['channels'])]

@@ -1,0 +1,14 @@
+#!/bin/bash
+# Same E200 cable: select 10 MHz temporarily, restore the original GPSDO mode.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+if [[ ${1:-} == --help ]]; then
+    echo 'Usage: tools/check-reference --report PATH [--timeout SECONDS]'
+    echo 'Temporarily selects the existing OUT1 clock instead of PPS; requires OUT1 = 10 MHz.'
+    exit 0
+fi
+before=$("$root/tools/gpsdo" --status)
+restore=$(python3 -c 'import json,sys; s=json.load(sys.stdin); assert s["out1_frequency_hz"]==10000000,"OUT1 clock must already be 10 MHz"; print("on" if s["pps_enabled"] else "off")' <<< "$before")
+trap '"$root/tools/gpsdo" --pps "$restore" >/dev/null' EXIT
+"$root/tools/gpsdo" --pps off >/dev/null
+"$root/tools/run" reference-check "$@"

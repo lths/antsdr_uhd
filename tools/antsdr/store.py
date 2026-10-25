@@ -28,7 +28,7 @@ def profile(value):
     allowed = {'schema_version', 'name', 'frequency_hz', 'sample_rate', 'bandwidth_hz',
                'gain_db', 'channels', 'antenna', 'clock_source', 'calibration',
                'gain_mode', 'channel_settings', 'auto_dc_offset', 'auto_iq_balance',
-               'lo_offset_hz', 'settle_seconds', 'fir_taps'}
+               'lo_offset_hz', 'settle_seconds', 'fir_taps', 'time_source', 'utc_timestamps', 'reference_timeout_seconds'}
     if not isinstance(value, dict) or set(value)-allowed:
         raise ValueError('Unknown profile fields')
     value = dict(value)
@@ -46,6 +46,15 @@ def profile(value):
         raise ValueError('Unsupported receive antenna')
     if value.get('clock_source', 'internal') not in ('internal', 'external'):
         raise ValueError('Unsupported clock source')
+    if value.get('time_source', 'internal') not in ('none', 'internal', 'external'):
+        raise ValueError('Unsupported time source')
+    if type(value.get('utc_timestamps', False)) is not bool:
+        raise ValueError('utc_timestamps must be a boolean')
+    if value.get('utc_timestamps') and value.get('time_source', 'internal') != 'external':
+        raise ValueError('GPS UTC timestamps require the external PPS time source')
+    if value.get('clock_source') == 'external' and value.get('time_source') == 'external':
+        raise ValueError('E200 PPS and 10 MHz share one connector; select one external input mode')
+    number(value.get('reference_timeout_seconds', 30), .1, 120, 'reference_timeout_seconds')
     if value.get('calibration'):
         name(value['calibration'])
     if value.get('gain_mode', 'manual') not in ('manual', 'slow', 'fast'):

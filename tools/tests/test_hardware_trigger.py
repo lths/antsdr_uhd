@@ -29,6 +29,7 @@ class HardwareTriggerTest(unittest.TestCase):
         device.get_rx_bandwidth.return_value = DEFAULT['bandwidth_hz']
         fake.types.RXMetadata.return_value.time_spec.get_real_secs.return_value = 100
         device.get_time_now.return_value.get_real_secs.return_value = 100
+        device.get_time_last_pps.return_value.get_real_secs.return_value = 100
         for getter in ('get_rx_freq_range', 'get_rx_gain_range', 'get_rx_bandwidth_range'):
             getattr(device, getter).return_value.start.return_value = 0
             getattr(device, getter).return_value.stop.return_value = 10e9

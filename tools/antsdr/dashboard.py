@@ -11,6 +11,7 @@ from . import ops
 from .radio import Receiver
 from .store import atomic_json, name, number, utc
 from .transmit import Transmitter, settings as transmit_settings
+from .gpsdo import snapshot as gps_snapshot
 
 
 class Application:
@@ -40,8 +41,12 @@ class Application:
             raise ValueError('A radio job must be a JSON object')
         if request.get('kind') == 'transmit':
             return self.start_transmit(request)
-        if set(request)-{'kind','profile','duration','threshold_dbfs','pretrigger_seconds','trigger_timeout','trigger_after_seconds','capture_name','trigger_mode','device_delay_seconds'}:
+        if request.get('kind') in ('scan', 'throughput', 'soak'):
+            return self.start_measurement(request)
+        if set(request)-{'kind','profile','duration','threshold_dbfs','pretrigger_seconds','trigger_timeout','trigger_after_seconds','capture_name','trigger_mode','device_delay_seconds','sigmf'}:
             raise ValueError('Unknown job field')
+        if type(request.get('sigmf', False)) is not bool:
+            raise ValueError('sigmf must be a boolean')
         kind = request.get('kind')
         if kind not in ('spectrum', 'capture', 'inspect'):
             raise ValueError('Unsupported receive job')
@@ -87,6 +92,8 @@ class Application:
             def frame(value):
                 with self.lock:
                     self.state['frame'] = value
+                    if 'stream_stats' in value:
+                        self.state['job']['progress'] = value['stream_stats']
 
             def worker():
                 receiver = None
@@ -101,6 +108,9 @@ class Application:
                                           device_delay_seconds=device_delay)
                     receiver.close()
                     receiver = None
+                    if output and request.get('sigmf') and result['saved_samples_per_channel']:
+                        from .recordings import export_sigmf
+                        result['sigmf'] = export_sigmf(output, output.with_suffix(''))
                     with self.lock:
                         self.state['job'].update(status='complete' if result['complete'] else 'stopped', report=result)
                         if output: self.state['job']['capture_file'] = output.name
@@ -110,6 +120,69 @@ class Application:
                 finally:
                     if receiver:
                         receiver.close()
+            self.thread = threading.Thread(target=worker, daemon=True)
+            self.thread.start()
+
+    def start_measurement(self, request):
+        kind = request['kind']
+        allowed = {'kind', 'profile'} | {
+            'scan': {'frequencies', 'dwell', 'cycles'},
+            'throughput': {'duration', 'rates', 'all_channels'},
+            'soak': {'duration'}}[kind]
+        if set(request) - allowed:
+            raise ValueError('Unknown measurement field')
+        config = self.store.get('profiles', request['profile'])
+        duration = number(request.get('duration', 5), .1 if kind == 'throughput' else 1, 3600, 'duration')
+        if kind == 'scan':
+            from .scan import validate
+            validate(request.get('frequencies'), request.get('dwell', .025), request.get('cycles', 1), config)
+        rates = request.get('rates', [1e6, 5e6, 10e6])
+        if kind == 'throughput':
+            if not isinstance(rates, list) or not 1 <= len(rates) <= 32:
+                raise ValueError('Choose 1–32 rates')
+            for rate in rates:
+                number(rate, 1e3, 61.44e6, 'rate')
+            if type(request.get('all_channels', False)) is not bool:
+                raise ValueError('all_channels must be a boolean')
+        destination = self.store.root/'measurements'/(kind+'-'+str(time.time_ns())+'.json')
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with self.lock:
+            if self.thread and self.thread.is_alive():
+                raise ValueError('A radio job is already running')
+            self.cancel.clear()
+            self.state['frame'] = None
+            self.state['job'] = {'kind': kind, 'status': 'starting', 'report_file': destination.name}
+            def frame(value):
+                with self.lock:
+                    self.state['frame'] = value
+                    if 'stream_stats' in value:
+                        self.state['job']['progress'] = value['stream_stats']
+            def completed_case(value):
+                with self.lock:
+                    self.state['job']['progress'] = {key: value.get(key) for key in
+                                                   ('requested_rate', 'channels', 'passed', 'error')}
+            def worker():
+                try:
+                    with self.lock:
+                        self.state['job']['status'] = 'receiving'
+                    if kind == 'scan':
+                        from .scan import run
+                        calibration = self.store.get('calibrations', config['calibration']) if config.get('calibration') else None
+                        result = run(self.host, config, request['frequencies'], request.get('dwell', .025),
+                                     request.get('cycles', 1), destination, self.cancel, frame, calibration)
+                    elif kind == 'throughput':
+                        from .measurements import throughput
+                        result = throughput(self.host, config, rates, duration,
+                                            [[0], [1], [0,1]] if request.get('all_channels') else None,
+                                            destination, self.cancel, completed_case)
+                    else:
+                        from .measurements import endurance
+                        result = endurance(self.host, config, duration, destination, self.cancel, on_progress=frame)
+                    with self.lock:
+                        self.state['job'].update(status='complete' if result['complete'] else 'stopped', report=result)
+                except Exception as error:
+                    with self.lock:
+                        self.state['job'].update(status='failed', error=str(error))
             self.thread = threading.Thread(target=worker, daemon=True)
             self.thread.start()
 
@@ -163,7 +236,9 @@ class Application:
 
     def snapshot(self):
         with self.lock:
-            return json.loads(json.dumps(self.state))
+            result = json.loads(json.dumps(self.state))
+        result['gpsdo'] = gps_snapshot(self.store.root/'timing/gpsdo.json')
+        return result
 
 
 def make_server(app, port):
