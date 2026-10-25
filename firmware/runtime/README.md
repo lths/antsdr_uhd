@@ -107,8 +107,10 @@ python3 -m unittest discover -s firmware/runtime/tests -v
 renewal, owner changes, stalled/partial DDR queue handovers, oversized packets,
 source filtering on every offload port, and continued CPU access without a
 lease. The focused C++ `ant_control_test` includes lease lifetime, competing
-owner, and lost-renewal tests. Physical external PPS triggering still needs a
-connected pulse source.
+owner, and lost-renewal tests. Physical external PPS triggering and relative
+time synchronization have been verified with a GPS-locked LBE-1421 on the E200.
+`host/tests/ant_pps_input.py` repeats the single/dual-channel receive-only check
+with a connected 1 PPS source; see the [operations guide](../../tools/README.md).
 
 `firmware/fpga/tests/run_deep_fifo.sh` tests the actual DDR core with packet
 pauses, input starvation, AXI backpressure, delayed write commitment, memory

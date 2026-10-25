@@ -133,6 +133,29 @@ arming do not fire a new capture. Verify the connector's electrical limits
 before wiring a source. An untriggered finite capture reports `complete: false`.
 Old FPGA images reject hardware level/edge modes explicitly.
 
+Physical PPS input and single/dual-channel edge triggering have been verified on
+the AD9361 E200 with a GPS-locked Leo Bodnar LBE-1421. Select **1 PPS on Output 1**
+in the GPSDO configuration; its default 10 MHz clock causes repeated external
+edges rather than one pulse per second. In this test, the LBE-1421 emitted no PPS
+until it acquired GPS lock. Position its GPS antenna with a clear sky view.
+
+With Gqrx and other radio clients closed, repeat the receive-only check in the
+host container:
+
+```sh
+docker run --rm --network host --user "$(id -u):$(id -g)" \
+    -v "$PWD:/work" antsdr-host:22.04 python3 host/tests/ant_pps_input.py \
+    --report firmware/build/validation/pps-input.json
+```
+
+The check rejects a disabled/missing or fast external signal, verifies the PPS
+time latch and synchronization, and captures three finite bursts on RX0, RX1,
+and both channels. Each burst contains 25,000 samples per channel at 1 MS/s.
+The report destination must be new. It restores the original time source after
+testing and sends no transmit samples. PPS synchronization sets a relative time
+origin; UTC numbering and disciplining the RF/sample clock require separate
+configuration. The sample clock remains internal during this check.
+
 Files contain little-endian complex float32, interleaved by sample then channel.
 Each `.cf32.json` sidecar records requested and actual settings, device serial,
 device sample timestamps, trigger details, calibration, errors and discontinuities.

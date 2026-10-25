@@ -157,8 +157,15 @@ python3 host/tests/ant_trigger_modes.py --expect-external-timeout \
     --report firmware/build/validation/trigger-matrix.json
 ```
 
-Physical external-edge validation remains pending because no external source is
-connected. FPGA level mode supports one RX channel; device-time and external
+Physical external PPS input was verified on the AD9361 E200 with a GPS-locked
+Leo Bodnar LBE-1421 set to PPS on Output 1. The check detected ten consecutive
+external pulses, synchronized device time on PPS, and completed nine finite
+captures across RX0, RX1, and both channels at 1 MS/s without receive errors.
+First-sample timestamps were within one sample period of the PPS latch.
+Repeat with `host/tests/ant_pps_input.py`; see the operations guide for setup.
+This verifies edge-triggered reception and relative time synchronization;
+absolute UTC accuracy and external frequency-reference locking remain untested.
+FPGA level mode supports one RX channel; device-time and external
 edge modes support both. Hardware modes do not retain pretrigger samples. The
 modern profile currently targets SD boot on E200; QSPI update paths, E316,
 external reference clocks, RF calibration and prolonged soak tests remain
@@ -199,4 +206,5 @@ python3 host/tests/ant_device_lease.py \
 
 This test requires exclusive radio access but no SSH credentials. FPGA tests
 `run_lease.sh` and `run_deep_fifo.sh` require the licensed Vivado installation.
-External PPS electrical verification still requires a connected pulse source.
+External PPS and receive-trigger verification uses `host/tests/ant_pps_input.py`
+with a connected 1 PPS source; see the hardware validation notes above.
