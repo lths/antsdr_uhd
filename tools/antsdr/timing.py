@@ -20,6 +20,8 @@ class Timing:
         self.discontinuities = 0
         self.current_interval_good = False
         self.utc_losses = 0
+        self.utc_loss_reason = None
+        self.utc_loss_events = deque(maxlen=16)
         self.anchor = None
         self.candidate = None
         self.gps = {'available': False}
@@ -41,6 +43,9 @@ class Timing:
                     self.error = str(error)
                     if self.anchor is not None:
                         self.utc_losses += 1
+                        self.utc_loss_reason = 'PPS monitor read failed: ' + str(error)
+                        self.utc_loss_events.append({'host_monotonic': time.monotonic(),
+                                                     'reason': self.utc_loss_reason})
                     self.anchor = None
             self.stop.wait(.05)
 
@@ -52,6 +57,10 @@ class Timing:
         finally:
             if had_anchor and self.anchor is None:
                 self.utc_losses += 1
+                self.utc_loss_events.append({'host_monotonic': host, 'reason': self.utc_loss_reason,
+                                             'rmc_age_seconds': host - gps['rmc_received_monotonic']
+                                             if 'rmc_received_monotonic' in gps else None,
+                                             'rmc_utc': gps.get('rmc_utc')})
 
     def _observe(self, value, host, gps):
         self.gps = gps
@@ -64,18 +73,24 @@ class Timing:
                 self.intervals.append(interval)
             elif interval > 1.5:
                 self.missed += max(1, round(interval) - 1)
+                self.utc_loss_reason = 'Missing PPS edge'
                 self.anchor = self.candidate = None
             else:
                 self.discontinuities += 1
+                self.utc_loss_reason = 'Device PPS time discontinuity'
                 self.anchor = self.candidate = None
             self.edges.append((value, host))
             self.last_edge_host = host
         self.last = value
         fresh = (gps.get('available', False) and gps.get('gps_locked', False)
                  and gps.get('pps_enabled', False) and gps.get('rmc_valid', False)
-                 and -.06 <= host - gps.get('rmc_received_monotonic', -100) < 1.5)
+                 # RMC emission can move between .00 and .50 seconds. Add
+                 # bridge publication latency without treating that legitimate
+                 # 1.5-second inter-epoch gap as a lost GPS observation.
+                 and -.06 <= host - gps.get('rmc_received_monotonic', -100) < 2.0)
         if (not fresh or self.source != 'external'
                 or (self.last_edge_host is not None and host - self.last_edge_host > 1.5)):
+            self.utc_loss_reason = 'GPS/NMEA unavailable, unlocked or stale; or external PPS missing'
             self.anchor = self.candidate = None
             return
         # The RMC sentence must arrive shortly after the matching PPS. Refuse
@@ -95,6 +110,7 @@ class Timing:
                                'associated_monotonic': host,
                                'method': 'two consecutive PPS/RMC epochs; RMC latency <= 0.7 s'}
             else:
+                self.utc_loss_reason = 'Nonconsecutive PPS/NMEA epochs'
                 self.anchor = None
         self.candidate = candidate
 
@@ -111,6 +127,8 @@ class Timing:
                     'pps_age_seconds': age, 'pps_healthy': healthy,
                     'missed_pulses': self.missed + (max(0, int(age)) if age is not None and age > 1.5 else 0),
                     'time_discontinuities': self.discontinuities, 'utc_losses': self.utc_losses,
+                    'utc_loss_reason': self.utc_loss_reason,
+                    'utc_loss_events': list(self.utc_loss_events),
                     'last_pps_device_seconds': self.last, 'observed_intervals': intervals,
                     'local_clock_offset_ppm': ((sum(intervals)/len(intervals)-1)*1e6)
                     if intervals and healthy and self.source == 'external'

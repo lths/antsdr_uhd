@@ -87,6 +87,30 @@ class TimingTest(unittest.TestCase):
                        {'utc_timestamps': 1}, {'clock_source': 'external', 'time_source': 'external'}):
             with self.assertRaises(ValueError): profile(dict(DEFAULT, **fields))
 
+    def test_rmc_half_second_phase_change_tolerates_publication_latency(self):
+        clock = self.clock()
+        clock.observe(0, 99, {})
+        clock.observe(10, 100.01, self.gps(0, 100.12))
+        clock.observe(10, 100.2, self.gps(0, 100.12))
+        clock.observe(11, 101.01, self.gps(0, 100.12))
+        clock.observe(11, 101.2, self.gps(1, 101.12))
+        clock.observe(12, 102.01, self.gps(1, 101.12))
+        # The next RMC changes to .50 and is not published until .80.
+        clock.observe(12, 102.7, self.gps(1, 101.12))
+        with patch('antsdr.timing.time.monotonic', return_value=102.7):
+            self.assertTrue(clock.status()['utc_valid'])
+        clock.observe(12, 102.8, self.gps(2, 102.62))
+        with patch('antsdr.timing.time.monotonic', return_value=102.8):
+            self.assertTrue(clock.status()['utc_valid'])
+            self.assertEqual(clock.status()['utc_losses'], 0)
+        # A genuine stale NMEA stream still invalidates UTC, even with PPS.
+        clock.observe(13, 103.01, self.gps(2, 102.62))
+        clock.observe(14, 104.01, self.gps(2, 102.62))
+        clock.observe(14, 104.7, self.gps(2, 102.62))
+        with patch('antsdr.timing.time.monotonic', return_value=104.7):
+            self.assertFalse(clock.status()['utc_valid'])
+            self.assertIn('stale', clock.status()['utc_loss_events'][-1]['reason'])
+
     def test_missing_bridge_is_explicit(self):
         self.assertFalse(snapshot('/not/a/timing/file')['available'])
 
