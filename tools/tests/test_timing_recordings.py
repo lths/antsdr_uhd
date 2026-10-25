@@ -90,6 +90,21 @@ class TimingTest(unittest.TestCase):
     def test_missing_bridge_is_explicit(self):
         self.assertFalse(snapshot('/not/a/timing/file')['available'])
 
+    def test_public_status_is_readable_before_atomic_publication(self):
+        import os
+        from antsdr.store import atomic_json
+        replace = os.replace
+        observed = []
+        def publish(source, destination):
+            observed.append(Path(source).stat().st_mode & 0o777)
+            replace(source, destination)
+        with tempfile.TemporaryDirectory() as root, patch('antsdr.store.os.replace', side_effect=publish):
+            path = Path(root)/'status.json'
+            atomic_json(path, {'gps_locked': True}, mode=0o644)
+            self.assertEqual(observed, [0o644])
+            atomic_json(path, {'secret': 'private'})
+            self.assertEqual(observed, [0o644, 0o600])
+
 
 class RecordingTest(unittest.TestCase):
     def capture(self, root, channels=2):

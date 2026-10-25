@@ -102,11 +102,14 @@ def calibration(value):
     return dict(value)
 
 
-def atomic_json(path, value):
+def atomic_json(path, value, *, mode=0o600):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temporary = tempfile.mkstemp(prefix='.'+path.name, dir=str(path.parent))
     try:
+        # Set access before publishing the inode. A chmod after replace leaves
+        # readers a window where an otherwise valid status file is unreadable.
+        os.fchmod(fd, mode)
         with os.fdopen(fd, 'w') as stream:
             json.dump(value, stream, indent=2, sort_keys=True, allow_nan=False)
             stream.write('\n')

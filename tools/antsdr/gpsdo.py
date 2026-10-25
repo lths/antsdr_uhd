@@ -139,8 +139,9 @@ def bridge(hid, serial, destination):
                 time.sleep(.1)
             if time.monotonic() >= deadline:
                 state.update(device.status())
-                atomic_json(destination, state)
-                os.chmod(destination, 0o644)  # Status contains no credentials or position.
+                # Public status contains no credentials or position. Publish
+                # its read permissions atomically with the new contents.
+                atomic_json(destination, state, mode=0o644)
                 deadline = time.monotonic() + .2
     finally:
         if fd is not None:
