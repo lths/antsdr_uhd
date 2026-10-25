@@ -127,7 +127,7 @@ class Timing:
                     'pps_age_seconds': age, 'pps_healthy': healthy,
                     'missed_pulses': self.missed + (max(0, int(age)) if age is not None and age > 1.5 else 0),
                     'time_discontinuities': self.discontinuities, 'utc_losses': self.utc_losses,
-                    'utc_loss_reason': self.utc_loss_reason,
+                    'utc_loss_reason': self.utc_loss_events[-1]['reason'] if self.utc_loss_events else None,
                     'utc_loss_events': list(self.utc_loss_events),
                     'last_pps_device_seconds': self.last, 'observed_intervals': intervals,
                     'local_clock_offset_ppm': ((sum(intervals)/len(intervals)-1)*1e6)

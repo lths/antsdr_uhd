@@ -67,6 +67,7 @@ function renderTiming(state){
   if(g.available)lines.push(`Output 1: ${g.pps_enabled?'1 PPS':g.out1_frequency_hz+' Hz'} · GPS UTC ${g.rmc_valid?g.rmc_utc:'unavailable'}`);
   if(t){const active=['receiving','starting'].includes(state.job?.status);lines.push(`${active?'Live':'Last session'} board time source: ${t.time_source} · PPS ${t.pps_healthy?'healthy':'waiting / missing'}`);lines.push(`PPS age at observation: ${t.pps_age_seconds===null?'unavailable':t.pps_age_seconds.toFixed(2)+' s'} · Missed pulses ${t.missed_pulses} · Time discontinuities ${t.time_discontinuities}`);lines.push(`UTC association ${active&&t.utc_valid?'valid':'not currently verified'}${t.local_clock_offset_ppm===null?'':' · Local clock offset '+t.local_clock_offset_ppm.toFixed(2)+' ppm (PPS estimate)'}`);}
   else lines.push('Board PPS: start a radio session to measure');
+  if(t&&!t.utc_valid&&t.utc_loss_reason)lines.push('Last UTC loss: '+t.utc_loss_reason);
   $('timingStatus').textContent=lines.join('\n');
 }
 async function measurement(body){try{await api('/api/jobs',{...body,profile:$('profile').value});$('measurementStatus').textContent='Receive job started';}catch(e){$('measurementStatus').textContent=e.message;}}

@@ -113,6 +113,10 @@ class TimingTest(unittest.TestCase):
 
     def test_missing_bridge_is_explicit(self):
         self.assertFalse(snapshot('/not/a/timing/file')['available'])
+        clock = self.clock()
+        clock.observe(0, 100, {})
+        self.assertEqual(clock.status()['utc_losses'], 0)
+        self.assertIsNone(clock.status()['utc_loss_reason'])
 
     def test_public_status_is_readable_before_atomic_publication(self):
         import os
