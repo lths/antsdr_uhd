@@ -90,6 +90,11 @@ export, RX fast-lock scanning, receive-rate sweeps and endurance checks. Run
 `tools/gpsdo` separately for read-only LBE-1421 status and NMEA telemetry. See
 the [timing and measurement guide](tools/README.md#timing-recordings-and-measurements)
 for reference-clock checks and controlled receiver measurements.
+The [hardware validation record](firmware/FEATURES.md#timing-scan-and-measurement-tools)
+lists tested rates and remaining checks: either RX channel passed a three-second
+25 MS/s test, while dual RX passed at 10 MS/s per channel. External 10 MHz
+acquisition still fails on this unit; absolute RF calibration requires bench
+equipment. Coherence testing is deferred.
 
 ## Build E200 firmware
 

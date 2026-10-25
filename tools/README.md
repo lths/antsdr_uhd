@@ -279,6 +279,8 @@ time discontinuities, and UTC association. Board PPS is measured through the
 active radio session; an idle dashboard labels its last observation accordingly.
 The short-term local clock-offset estimate is available only with external PPS
 and a GPS-locked source. It is diagnostic data, not an automatic calibration.
+Invalid UTC status includes its last loss reason, and reports retain a bounded
+history of UTC loss events for diagnosis.
 
 To require GPS-derived sample timestamps, save a receive profile with
 `"time_source": "external"` and `"utc_timestamps": true`. The dashboard exposes
@@ -292,6 +294,10 @@ returns before the capture ends. This is a software epoch association, not a
 calibration of absolute antenna-to-ADC timing. PPS cable delay and local-clock
 interpolation error are not removed. Host `started_at_utc` and frame wall times
 remain separate from `first_sample_utc` / `first_saved_sample_utc`.
+The freshness limit is two seconds: the observed RMC reporting phase can move
+between .00, .50 and .60, creating a valid gap longer than 1.5 seconds after
+bridge publication delay. Each newly associated epoch must still match one PPS
+within 0.7 seconds and advance consecutively with the preceding epoch.
 
 ```sh
 tools/run gps-status
@@ -327,6 +333,10 @@ unchanged. Close radio clients and finish any recording first. The FPGA source
 corrects `CLKIN_10MHz_REQ` to an output so its clock buffer can be enabled;
 this hardware change requires the rebuilt FPGA image. A selected clock setting
 alone does not establish that the physical reference is locked.
+On the connected unit, the 2026-10-25 rebuilt image still failed to acquire
+lock during a 60-second LBE-1421 10 MHz check. PPS was restored afterward.
+The acquisition, loss and reacquisition sequence therefore remains a required
+hardware check; the tools fail explicitly instead of starting an unlocked capture.
 
 The Receive scanning and verification panel exposes scan, throughput and
 endurance jobs with the same exclusive radio owner and Stop control. CLI equivalents:
@@ -398,7 +408,8 @@ For long tests during development, copy the UHD library, Python binding and
 tools to an isolated runtime before starting. Rebuilding the shared library in
 place can invalidate memory mappings in an already-running client. The snapshot
 helper coordinates with the host build lock, caches copies by content hash,
-and publishes each completed copy atomically:
+including dashboard assets, and publishes each completed copy atomically.
+`SOURCE_REVISION` and `SOURCE_DIRTY` record the checkout state when it was copied:
 
 ```sh
 runtime=$(tools/freeze-runtime)

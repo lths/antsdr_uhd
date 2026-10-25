@@ -30,6 +30,7 @@ minimum-gain 902.1 MHz bursts and simultaneous receive.
 - [x] Device ownership leases with independent FPGA expiry and DDR session isolation
 - [x] AD9361 receiver tuning, per-channel AGC, live sensors and verified FIR tap loading (host driver/tools)
 - [x] GPS/PPS dashboard health and validated PPS/NMEA UTC sample tags
+- [x] Lock-gated external-clock profiles and a 10 MHz lock/loss verification tool
 - [x] Private SigMF export with UTC, channel interleaving, checksum and loss metadata
 - [x] RX fast-lock profiles and bounded receive scanning
 - [x] Single/dual receive-rate sweeps and receive endurance reporting
@@ -59,6 +60,41 @@ and 100/220 DSPs. Routed setup/hold slack is +0.232/+0.034 ns with no failing
 timing endpoints. The placed I/O report confirms the output on package pin M20.
 Reference-lock and extended-streaming results are recorded separately from
 the implementation checks under `firmware/build/validation/`.
+
+The 2026-10-25 candidate is installed and confirmed in SD slot B, with firmware
+source `a3200c393`. Host timing, transport and GPS publication fixes are in
+`3288061e3`; these require updated host tools rather than another SD installation.
+The original bootloader and confirmed slot A remain available for recovery.
+
+| Check on this E200 | Result |
+| --- | --- |
+| Automated checks | 55 tools tests, 42 firmware tests, four runtime protocol tests and four C++ suites passed |
+| Physical PPS | Internal/disabled/external modes and nine finite RX captures passed; observed first-sample offsets from PPS were 0.0625–0.9375 microseconds at 1 MS/s |
+| Existing receiver features | Six trigger cases, six restart cases and 11 AD9361 tuning/filter/telemetry cases passed |
+| Dashboard and scanning | UTC capture, eight stored profiles with 16 RX hops, rate jobs and a UTC-required soak passed; Stop cancelled active reception and preserved an incomplete report; no JavaScript exceptions |
+| SigMF | The live UTC recording passed the official v1.2.6 schema and SHA-512 data checks |
+| Three-second rate sweep | RX0 and RX1 individually passed through 25 MS/s; dual RX passed through 10 MS/s per channel. Dual 15/20/25 MS/s cases reported errors |
+| Five-minute dual RX | 2,999,975,936 samples per channel at 10 MS/s, zero overflows/timeouts/other receive errors; observed temperature 40.47–41.35 C |
+| Fifteen-minute diagnostic run | 8,999,911,424 samples per channel at 10 MS/s with zero receive errors. Required-UTC validation failed once before the freshness fix; this is not a passing UTC soak |
+| Corrected required-UTC dual RX | Five minutes at 10 MS/s per channel, 2,999,992,320 samples per channel, zero receive errors, missed pulses, time discontinuities or UTC losses; observed temperature 39.88–41.05 C |
+| UTC loss/recovery | A four-second pause of the host GPS bridge invalidated a required-UTC capture despite successful association recovery before the capture ended |
+| External 10 MHz | Acquisition failed throughout a 60-second check with LBE-1421 OUT1 selected as 10 MHz. Loss/reacquisition could not be validated; external-clock captures remain gated on real lock |
+
+The longer tests exposed and fixed concurrent access to the shared UDP control
+buffer pool, blocking Python time reads, synchronous checkpoint writes in the
+receive loop, a GPS status-file permission race, and a freshness boundary when
+NMEA reporting phases changed. The latter has a deterministic regression and
+bounded loss-reason history. Checkpoints now use a
+bounded background writer. `tools/freeze-runtime` keeps running checks independent
+of later driver rebuilds. Interrupted or failed trials are retained as failures;
+the interrupted one-hour attempt is not a passing one-hour soak.
+
+Controlled RF level, image/filter rejection and AGC step/overload measurements
+have synthetic-data checks, but remain unverified with a calibrated RF source
+and attenuation. The external-reference failure also remains unresolved on this
+unit; the enable-pin correction alone did not establish lock. UTC tags associate
+sample epochs with PPS/NMEA and do not establish absolute RF frequency or
+antenna-to-ADC timing accuracy.
 
 See the [timing and measurement guide](../tools/README.md#timing-recordings-and-measurements)
 for commands, UTC association limits, shared-connector behavior and bench setup.
@@ -138,7 +174,7 @@ profiles, calibration, triggers, FFT levels and dashboard access.
 
 ## FPGA assessment
 
-The hardware-trigger implementation uses 39,986/53,200 LUTs (75.16%),
+An earlier hardware-trigger implementation used 39,986/53,200 LUTs (75.16%),
 45,199/106,400 registers (42.48%), 95.5/140 block RAM tiles and 100/220 DSPs.
 Routed setup/hold slack is +0.163/+0.024 ns, with zero total negative slack.
 The build now resets top-level synthesis before implementation so edited RTL
@@ -191,12 +227,13 @@ captures across RX0, RX1, and both channels at 1 MS/s without receive errors.
 First-sample timestamps were within one sample period of the PPS latch.
 Repeat with `host/tests/ant_pps_input.py`; see the operations guide for setup.
 This verifies edge-triggered reception and relative time synchronization;
-absolute UTC accuracy and external frequency-reference locking remain untested.
+absolute antenna-to-ADC UTC accuracy remains unmeasured. GPS/NMEA UTC tags and
+the failed external-reference acquisition check are recorded above.
 FPGA level mode supports one RX channel; device-time and external
 edge modes support both. Hardware modes do not retain pretrigger samples. The
 modern profile currently targets SD boot on E200; QSPI update paths, E316,
-external reference clocks, RF calibration and prolonged soak tests remain
-outside the hardware validation performed here.
+and RF calibration remain outside the hardware validation performed here.
+Current reference-clock and endurance results are recorded above.
 
 ## Runtime 2 management and ownership
 
