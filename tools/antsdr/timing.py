@@ -113,7 +113,9 @@ class Timing:
                     'time_discontinuities': self.discontinuities, 'utc_losses': self.utc_losses,
                     'last_pps_device_seconds': self.last, 'observed_intervals': intervals,
                     'local_clock_offset_ppm': ((sum(intervals)/len(intervals)-1)*1e6)
-                    if intervals and self.source == 'external' and self.gps.get('gps_locked') else None,
+                    if intervals and healthy and self.source == 'external'
+                    and self.gps.get('available') and self.gps.get('gps_locked')
+                    and self.gps.get('pps_enabled') else None,
                     'utc_valid': valid, 'utc_anchor': dict(self.anchor) if valid else None,
                     'gpsdo': dict(self.gps), 'error': self.error}
 

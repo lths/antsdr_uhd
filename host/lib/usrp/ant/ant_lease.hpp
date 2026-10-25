@@ -109,7 +109,14 @@ public:
     uhd::transport::managed_recv_buffer::sptr get_recv_buff(double timeout) override
     { return _transport->get_recv_buff(timeout); }
     uhd::transport::managed_send_buffer::sptr get_send_buff(double timeout) override
-    { _lease->check(); return _transport->get_send_buff(timeout); }
+    {
+        // Local SPI and radio time/control endpoints share one UDP buffer
+        // pool. Its send-buffer index is not thread safe, even though each
+        // radio controller separately locks its own command sequence.
+        std::lock_guard<std::mutex> lock(_send_mutex);
+        if (_lease) _lease->check();
+        return _transport->get_send_buff(timeout);
+    }
     size_t get_num_recv_frames() const override { return _transport->get_num_recv_frames(); }
     size_t get_recv_frame_size() const override { return _transport->get_recv_frame_size(); }
     size_t get_num_send_frames() const override { return _transport->get_num_send_frames(); }
@@ -117,4 +124,5 @@ public:
 private:
     std::shared_ptr<ant_device_lease> _lease;
     sptr _transport;
+    std::mutex _send_mutex;
 };

@@ -80,6 +80,7 @@ class Receiver:
         self.device = self.stream = None
         self.telemetry = None
         self.timing = None
+        self.last_report = None
         self.reference_lock_lost = False
         try:
             self._initialize(address)
@@ -180,7 +181,9 @@ class Receiver:
             raise ValueError('Pretrigger buffer exceeds 256 MiB')
         trigger = Trigger(self.rate, pretrigger_seconds, threshold_dbfs, hold=trigger_after_seconds is not None)
         metadata = self.uhd.types.RXMetadata()
-        count = max(1024, min(16384, int(self.stream.get_max_num_samps())))
+        # get_max_num_samps() is the packet payload, not the receive-call limit.
+        # Aggregate packets in C++ to avoid tens of thousands of Python calls/s.
+        count = 16384
         buffer = np.empty((len(self.settings['channels']), count), dtype=np.complex64)
         hardware_samples = round(duration*self.rate) if self.trigger_mode != 'host' else None
         start_cmd = self.uhd.types.StreamCMD(self.uhd.types.StreamMode.num_done if hardware_samples
@@ -238,6 +241,8 @@ class Receiver:
                 monitor_thread = threading.Thread(target=monitor, daemon=True)
                 monitor_thread.start()
             while not (cancel and cancel.is_set()):
+                if self.telemetry and self.telemetry.get('errors'):
+                    raise RuntimeError('Receiver telemetry failed: ' + str(self.telemetry['errors']))
                 if hardware_samples and report['saved_samples_per_channel'] >= hardware_samples:
                     break
                 elapsed = time.monotonic()-start
@@ -253,7 +258,9 @@ class Receiver:
                 if error == self.uhd.types.RXMetadataErrorCode.overflow:
                     report['overflows'] += 1
                     if len(report['discontinuities']) < 1000:
-                        report['discontinuities'].append({'at_received_sample':report['received_samples_per_channel'], 'reason':'overflow'})
+                        report['discontinuities'].append({'at_received_sample':report['received_samples_per_channel'],
+                                                         'reason':'overflow',
+                                                         'out_of_sequence': bool(metadata.out_of_sequence)})
                     trigger.blocks.clear(); trigger.count = 0
                     continue
                 if error != self.uhd.types.RXMetadataErrorCode.none:
@@ -340,6 +347,7 @@ class Receiver:
                     report['complete'] = False
                 report['elapsed_seconds'] = time.monotonic()-start
                 report['ended_at_utc'] = utc()
+                self.last_report = report
                 if output:
                     atomic_json(output.with_suffix(output.suffix+'.json'), report)
         return report

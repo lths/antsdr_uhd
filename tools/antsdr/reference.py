@@ -45,7 +45,7 @@ def check(address, report, timeout=60):
         command.num_samps, command.stream_now = 25000, True
         stream.issue_stream_cmd(command)
         received = 0
-        buffer = np.empty((1, min(16384, stream.get_max_num_samps())), np.complex64)
+        buffer = np.empty((1, 16384), np.complex64)
         metadata = uhd.types.RXMetadata()
         deadline = time.monotonic()+3
         while received < 25000:

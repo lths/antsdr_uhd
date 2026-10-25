@@ -142,6 +142,7 @@ class RecordingTest(unittest.TestCase):
             result = analyze_capture(path, 62500, -50, 'Calibrated source at RX input after 40 dB pad')
             channel = result['channels'][0]
             self.assertAlmostEqual(channel['rms_dbfs'], 20*np.log10(.125), places=4)
+            self.assertAlmostEqual(channel['tone_dbfs'], channel['rms_dbfs'], places=4)
             self.assertGreater(channel['image_rejection_db'], 80)
             self.assertEqual(channel['clipped_samples'], 0)
             self.assertAlmostEqual(channel['level_correction_db'], -50-channel['rms_dbfs'])
@@ -187,6 +188,47 @@ class RecordingTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     endurance('192.168.1.10', DEFAULT, 3600, Path(root)/'report.json', output=Path(root)/'data.cf32')
             receiver.assert_not_called()
+
+
+class EnduranceFailureTest(unittest.TestCase):
+    def test_checkpoint_disk_io_does_not_block_receive_callback(self):
+        import threading
+        from antsdr.store import atomic_json
+        started, release = threading.Event(), threading.Event()
+        receive_thread = threading.get_ident()
+        def slow_write(path, value):
+            if threading.get_ident() != receive_thread:
+                started.set()
+                if not release.wait(2):
+                    raise RuntimeError('Receive callback blocked on checkpoint I/O')
+            atomic_json(path, value)
+        def receive(duration, **options):
+            options['on_spectrum']({'time_utc': '2026-10-25T14:04:01Z'})
+            self.assertTrue(started.wait(1))
+            release.set()
+            return {'complete': True, 'overflows': 0, 'timeouts': 0, 'other_errors': 0}
+        with tempfile.TemporaryDirectory() as root, patch('antsdr.measurements.Receiver') as receiver:
+            receiver.return_value.actual = [{'channel': 0, 'sample_rate': 1e6}]
+            receiver.return_value.run.side_effect = receive
+            with patch('antsdr.measurements.atomic_json', side_effect=slow_write):
+                result = endurance('192.168.1.10', DEFAULT, 10, Path(root)/'report.json')
+            self.assertTrue(result['complete'])
+            self.assertEqual(len(result['samples']), 1)
+
+    def test_failed_endurance_keeps_capture_statistics_and_exception_type(self):
+        with tempfile.TemporaryDirectory() as root, patch('antsdr.measurements.Receiver') as receiver:
+            receiver.return_value.actual = [{'channel': 0, 'sample_rate': 1e6}]
+            receiver.return_value.run.side_effect = KeyboardInterrupt()
+            receiver.return_value.last_report = {'complete': False, 'overflows': 2,
+                                                  'received_samples_per_channel': 1234}
+            report = Path(root)/'report.json'
+            with self.assertRaises(KeyboardInterrupt):
+                endurance('192.168.1.10', DEFAULT, 10, report)
+            saved = json.loads(report.read_text())
+            self.assertFalse(saved['complete'])
+            self.assertEqual(saved['error'], 'KeyboardInterrupt')
+            self.assertEqual(saved['capture']['overflows'], 2)
+            receiver.return_value.close.assert_called_once()
 
 
 class MeasurementDashboardTest(unittest.TestCase):

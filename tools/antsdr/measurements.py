@@ -2,7 +2,9 @@
 import json
 import math
 from pathlib import Path
+import queue
 import shutil
+import threading
 import time
 
 import numpy as np
@@ -72,26 +74,56 @@ def endurance(address, settings, duration, report, cancel=None, output=None, on_
               'complete': False, 'samples': [], 'transmitted_samples': 0}
     receiver = None
     last = 0
+    pending = queue.Queue(maxsize=1)
+    writer_errors = []
+    def write_progress():
+        try:
+            while True:
+                frame = pending.get()
+                if frame is None:
+                    return
+                result['samples'].append({'host_utc': frame['time_utc'], 'telemetry': frame.get('telemetry'),
+                                          'timing': frame.get('timing'), 'signal': frame.get('signal'),
+                                          'stream_stats': frame.get('stream_stats'),
+                                          'storage_free_bytes': shutil.disk_usage(Path(report).parent).free})
+                atomic_json(report, result)
+                if on_progress:
+                    on_progress(frame)
+        except BaseException as error:
+            writer_errors.append(error)
+    writer = None
     try:
         receiver = Receiver(address, settings)
         result['actual'] = receiver.actual
+        writer = threading.Thread(target=write_progress, daemon=True)
+        writer.start()
         def progress(frame):
             nonlocal last
+            if writer_errors:
+                raise RuntimeError('Endurance report writer failed: ' + str(writer_errors[0]))
             if time.monotonic() - last < 10:
                 return
             last = time.monotonic()
-            result['samples'].append({'host_utc': frame['time_utc'], 'telemetry': frame.get('telemetry'),
-                                      'timing': frame.get('timing'), 'signal': frame.get('signal'),
-                                      'stream_stats': frame.get('stream_stats'),
-                                      'storage_free_bytes': shutil.disk_usage(Path(report).parent).free})
-            atomic_json(report, result)
-            if on_progress:
-                on_progress(frame)
-        capture = receiver.run(duration, output=output, cancel=cancel, on_spectrum=progress)
+            try:
+                pending.put_nowait(frame)
+            except queue.Full:
+                pass  # A slow disk must not block sample consumption.
+        try:
+            capture = receiver.run(duration, output=output, cancel=cancel, on_spectrum=progress)
+        finally:
+            if writer.is_alive():
+                pending.put(None, timeout=5)
+                writer.join(timeout=5)
+                if writer.is_alive():
+                    raise RuntimeError('Endurance report writer did not stop')
+            if writer_errors:
+                raise RuntimeError('Endurance report writer failed: ' + str(writer_errors[0]))
         result['capture'] = capture
         result['complete'] = capture['complete'] and not any(capture[k] for k in ('overflows', 'timeouts', 'other_errors'))
     except BaseException as error:
-        result['error'] = str(error)
+        result['error'] = str(error) or type(error).__name__
+        if receiver and receiver.last_report is not None:
+            result['capture'] = receiver.last_report
         raise
     finally:
         try:
@@ -150,6 +182,7 @@ def analyze_capture(source, tone_hz=None, reference_dbm=None, reference=None, st
         block = np.asarray(samples[-length:, channel])
         window = np.hanning(length)
         fft = np.fft.fftshift(np.fft.fft(block*window)) / window.sum()
+        window_noise_bandwidth_bins = length * float(np.dot(window, window)) / float(window.sum()**2)
         frequencies = np.fft.fftshift(np.fft.fftfreq(length, 1/rate))
         power = np.abs(fft)**2
         rms_dbfs = 10*math.log10(max(energy/count, 1e-24))
@@ -177,8 +210,10 @@ def analyze_capture(source, tone_hz=None, reference_dbm=None, reference=None, st
         if tone_hz is not None:
             wanted = int(np.argmin(np.abs(frequencies - tone_hz)))
             image = int(np.argmin(np.abs(frequencies + tone_hz)))
-            wanted_power = float(power[max(0,wanted-2):wanted+3].sum())
-            image_power = float(power[max(0,image-2):image+3].sum())
+            # Integrating adjacent Hann bins includes the window's noise
+            # bandwidth. Remove it so a bin-centered tone agrees with RMS.
+            wanted_power = float(power[max(0,wanted-2):wanted+3].sum()) / window_noise_bandwidth_bins
+            image_power = float(power[max(0,image-2):image+3].sum()) / window_noise_bandwidth_bins
             item['tone_offset_hz'] = float(frequencies[wanted])
             item['image_rejection_db'] = 10*math.log10(max(wanted_power,1e-24)/max(image_power,1e-24))
             item['tone_dbfs'] = 10*math.log10(max(wanted_power, 1e-24))

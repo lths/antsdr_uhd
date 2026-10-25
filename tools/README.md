@@ -354,9 +354,16 @@ Throughput reports every requested rate/channel case, actual coerced rates,
 errors and highest tested passing rates. Completion of a sweep does not mean
 every requested rate passed. `sc16` consumes four bytes per complex sample per
 channel before protocol overhead, so the 1 Gb/s link limits sustained rates
-below the chip's maximum. Endurance stores stream counters, temperature,
+below the chip's maximum. Shared control/SPI sends serialize access to their
+UDP buffer pool, and time/reference sensor reads release Python's execution
+lock. E200 RX defaults to 256 receive frames and a 4 MiB requested socket
+buffer; UHD device hints `num_recv_frames` and `recv_buff_size` override these.
+The operating system may cap socket buffers and UHD reports that limitation.
+Endurance stores stream counters, temperature,
 clipping, timing and free-storage observations every ten seconds plus its final
-report. Raw samples are optional via `soak --output`; available disk space is
+report. A bounded background writer saves checkpoints so disk synchronization
+cannot pause sample consumption. Control/telemetry failures stop the test and
+retain partial capture statistics. Raw samples are optional via `soak --output`; available disk space is
 checked before recording. Closing, cancellation and receive failures cannot
 report a complete endurance test. The default records no raw samples.
 
@@ -389,7 +396,15 @@ outside this change's scope at the owner's request.
 
 For long tests during development, copy the UHD library, Python binding and
 tools to an isolated runtime before starting. Rebuilding the shared library in
-place can invalidate memory mappings in an already-running client.
+place can invalidate memory mappings in an already-running client. The snapshot
+helper coordinates with the host build lock, caches copies by content hash,
+and publishes each completed copy atomically:
+
+```sh
+runtime=$(tools/freeze-runtime)
+ANTSDR_RUNTIME="$runtime" tools/run soak --profile e200-rx --duration 3600 \
+    --report .antsdr/endurance-frozen.json
+```
 
 ## Calibration and persistent settings
 

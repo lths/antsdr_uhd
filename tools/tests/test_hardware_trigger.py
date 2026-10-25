@@ -55,6 +55,7 @@ class HardwareTriggerTest(unittest.TestCase):
         received = 0
         def recv(buffer, metadata, timeout):
             nonlocal received
+            self.assertEqual(buffer.shape, (1, 16384))
             n = next(values)
             metadata.error_code = 'none' if n else 'timeout'
             metadata.time_spec.get_real_secs.return_value = 100.5+received/1e6
@@ -133,6 +134,19 @@ class HardwareTriggerTest(unittest.TestCase):
             report = json.loads(output.with_suffix('.cf32.json').read_text())
         self.assertFalse(report['complete'])
         self.assertIn('stop failed', report['error'])
+
+    def test_control_failure_stops_capture_and_preserves_partial_statistics(self):
+        fake, device, stream = self.radio()
+        with patch.dict('sys.modules', {'uhd': fake}):
+            receiver = Receiver('192.168.1.10', DEFAULT)
+            receiver.telemetry = {'errors': [{'channel': 0, 'error': 'control response lost'}]}
+            with self.assertRaisesRegex(RuntimeError, 'Receiver telemetry failed'):
+                receiver.run(.1)
+            self.assertFalse(receiver.last_report['complete'])
+            self.assertIn('control response lost', receiver.last_report['error'])
+            self.assertEqual(receiver.last_report['received_samples_per_channel'], 0)
+            stream.recv.assert_not_called()
+            receiver.close()
 
     def test_cancellation_during_final_receive_does_not_report_success(self):
         fake, device, stream = self.radio()

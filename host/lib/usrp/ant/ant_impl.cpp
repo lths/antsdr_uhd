@@ -498,9 +498,9 @@ ant_impl::ant_impl(const uhd::device_addr_t &device_addr)
         _ctrl_transport = udp_zero_copy::make(
                 addr, BOOST_STRINGIZE(MICROPHASE_ANT_UDP_CTRL_PORT), default_buff_args, ignored_params,
                 filtered_hints);
-        if (_device_lease) {
-            _ctrl_transport = std::make_shared<ant_leased_transport>(_device_lease, _ctrl_transport);
-        }
+        // Serialize the shared UDP send-buffer pool for all control endpoints,
+        // including explicit legacy sessions without a device lease.
+        _ctrl_transport = std::make_shared<ant_leased_transport>(_device_lease, _ctrl_transport);
         while (_ctrl_transport->get_recv_buff(0.0)) {
         } // flush ctrl xport
 
@@ -569,9 +569,21 @@ ant_impl::ant_impl(const uhd::device_addr_t &device_addr)
         ////////////////////////////////////////////////////////////////////
         udp_zero_copy::buff_params ignored_out_params;
         device_addr_t fi_hints;
+        zero_copy_xport_params rx_buff_args = default_buff_args;
+        if (_antsdr_product == antsdr_product_t::E200) {
+            // The shared socket demultiplexes two independently framed RX
+            // streams. Retain enough buffers for a full credit window while
+            // another channel is consumed, including scheduler/USB latency.
+            rx_buff_args.num_recv_frames = 256;
+            rx_buff_args.recv_buff_size = 4 * 1024 * 1024;
+        }
+        device_addr_t rx_hints;
+        for (const auto* key : {"recv_buff_size", "num_recv_frames"}) {
+            if (device_addr.has_key(key)) rx_hints[key] = device_addr[key];
+        }
         _data_rx_transport = udp_zero_copy::make(
-                addr, BOOST_STRINGIZE(MICROPHASE_ANT_UDP_DATA_RX_PORT), default_buff_args,
-                ignored_out_params, fi_hints);
+                addr, BOOST_STRINGIZE(MICROPHASE_ANT_UDP_DATA_RX_PORT), rx_buff_args,
+                ignored_out_params, rx_hints);
         if (_device_lease) _data_rx_transport = std::make_shared<ant_leased_transport>(_device_lease, _data_rx_transport);
         if (_data_rx_transport.get()) {
             _program_dispatcher(*_data_rx_transport);

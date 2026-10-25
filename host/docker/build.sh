@@ -1,5 +1,8 @@
 #!/bin/bash
 set -euo pipefail
+mkdir -p .antsdr
+exec 9>.antsdr/host-build.lock
+flock -x 9
 cmake -S host -B host/build-antsdr -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DENABLE_PYTHON_API=ON -DENABLE_TESTS=ON -DENABLE_ANT=ON \
     -DENABLE_B200=OFF -DENABLE_X300=OFF -DENABLE_MPMD=OFF \

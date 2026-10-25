@@ -94,6 +94,34 @@ BOOST_AUTO_TEST_CASE(device_lease_survives_until_the_last_control_transport) {
 }
 
 using namespace uhd::transport;
+class concurrent_send_probe : public mock_zero_copy {
+public:
+    concurrent_send_probe() : mock_zero_copy(vrt::if_packet_info_t::LINK_TYPE_CHDR) {}
+    managed_send_buffer::sptr get_send_buff(double) override {
+        if (++active > 1) overlap = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        --active;
+        return {};
+    }
+    std::atomic<unsigned> active{0};
+    std::atomic<bool> overlap{false};
+};
+BOOST_AUTO_TEST_CASE(shared_control_transport_serializes_concurrent_buffer_allocation) {
+    auto inner = std::make_shared<concurrent_send_probe>();
+    // Null lease also exercises the explicit legacy-firmware path.
+    ant_leased_transport transport(nullptr, inner);
+    std::atomic<bool> start{false};
+    auto worker = [&] {
+        while (!start) std::this_thread::yield();
+        for (unsigned i = 0; i < 100; ++i) transport.get_send_buff(0.0);
+    };
+    auto first = std::async(std::launch::async, worker);
+    auto second = std::async(std::launch::async, worker);
+    start = true;
+    first.get();
+    second.get();
+    BOOST_CHECK(!inner->overlap);
+}
 class observed_transport : public mock_zero_copy {
 public:
     observed_transport() : mock_zero_copy(vrt::if_packet_info_t::LINK_TYPE_CHDR) {}

@@ -1,0 +1,30 @@
+#!/bin/bash
+# Keep a running validation client independent of subsequent host rebuilds.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+mkdir -p .antsdr/runtimes
+exec 9>.antsdr/host-build.lock
+flock -s 9
+library=host/build-antsdr/lib/libuhd.so.4.1.0
+binding=$(rg --files -L host/build-antsdr/python/uhd -g 'libpyuhd*.so' | head -n 1)
+[[ -f "$library" && -n "$binding" ]] || { echo 'Build the host driver first' >&2; exit 1; }
+fingerprint=$({ sha256sum "$library" "$binding"; rg --files tools/antsdr host/python/uhd -g '*.py' | sort | while IFS= read -r path; do sha256sum "$path"; done; } | sha256sum | cut -d' ' -f1)
+destination=".antsdr/runtimes/$fingerprint"
+if [[ ! -f "$destination/READY" ]]; then
+    temporary=$(mktemp -d .antsdr/runtimes/.snapshot.XXXXXXXX)
+    trap 'rm -rf "$temporary"' EXIT
+    mkdir -p "$temporary/lib" "$temporary/python"
+    cp --reflink=auto "$library" "$temporary/lib/"
+    cp -aL host/build-antsdr/python/uhd "$temporary/python/"
+    cp -a tools/antsdr "$temporary/python/"
+    git rev-parse HEAD > "$temporary/SOURCE_REVISION"
+    touch "$temporary/READY"
+    # An atomic publication means clients never open an incomplete copy.
+    if ! mv -T "$temporary" "$destination" 2>/dev/null; then
+        [[ -f "$destination/READY" ]] || exit 1
+    fi
+    trap - EXIT
+    [[ ! -d "$temporary" ]] || rm -rf "$temporary"
+fi
+printf '%s\n' "$destination"

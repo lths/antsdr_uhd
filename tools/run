@@ -4,6 +4,13 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 docker image inspect antsdr-host:22.04 >/dev/null 2>&1 || docker build -t antsdr-host:22.04 "$root/host/docker"
 devices=()
 if [ -e /dev/ttyUSB0 ]; then devices=(--device /dev/ttyUSB0 --group-add "$(stat -c %g /dev/ttyUSB0)"); fi
+runtime=()
+if [[ -n ${ANTSDR_RUNTIME:-} ]]; then
+    snapshot=$(realpath "$root/$ANTSDR_RUNTIME")
+    [[ $snapshot == "$root/"* && -f "$snapshot/READY" ]] || { echo 'Invalid runtime snapshot' >&2; exit 1; }
+    relative=${snapshot#"$root/"}
+    runtime=(--env "LD_LIBRARY_PATH=/work/$relative/lib" --env "PYTHONPATH=/work/$relative/python")
+fi
 exec docker run --rm --init --network host "${devices[@]}" \
     --mount "type=bind,source=$root,target=/work" \
-    --env ANTSDR_PASSWORD antsdr-host:22.04 python3 -m antsdr "$@"
+    --env ANTSDR_PASSWORD "${runtime[@]}" antsdr-host:22.04 python3 -m antsdr "$@"

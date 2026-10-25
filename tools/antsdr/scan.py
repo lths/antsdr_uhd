@@ -56,7 +56,7 @@ def run(address, settings, frequencies, dwell=.025, cycles=1, report=None,
                                                 'preparation_seconds': time.monotonic()-preparation_start,
                                                 'actual_frequency_hz': device.get_rx_freq(channel)})
         count = round(radio.rate * dwell)
-        buffer = np.empty((1, min(16384, stream.get_max_num_samps())), dtype=np.complex64)
+        buffer = np.empty((1, 16384), dtype=np.complex64)
         for cycle in range(cycles):
             for slot, frequency in enumerate(frequencies):
                 if cancel and cancel.is_set():
